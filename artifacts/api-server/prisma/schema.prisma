@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model UserProgress {
+  id                 String   @id @default(uuid())
+  clerkUserId        String   @unique
+  questionsAttempted Int      @default(0)
+  accuracy           Float    @default(0.0)
+  studyHours         Int      @default(0)
+  currentStreak      Int      @default(0)
+  longestStreak      Int      @default(0)
+  updatedAt          DateTime @updatedAt
+}
+
+model SubjectPerformance {
+  id          String @id @default(uuid())
+  clerkUserId String
+  subjectName String
+  accuracy    Float  @default(0.0)
+  attemptedQs Int    @default(0)
+  @@unique([clerkUserId, subjectName])
+}
+
+model Question {
+  id            String   @id @default(uuid())
+  subject       String
+  difficulty    String
+  question      String
+  options       Json
+  correctAnswer Int
+  explanation   String
+  createdAt     DateTime @default(now())
+  attempts      UserQuestionAttempt[]
+}
+
+model UserQuestionAttempt {
+  id          String   @id @default(uuid())
+  clerkUserId String
+  questionId  String
+  question    Question @relation(fields: [questionId], references: [id])
+  isCorrect   Boolean
+  selectedAns Int
+  attemptedAt DateTime @default(now())
+  @@unique([clerkUserId, questionId])
+}

@@ -1,0 +1,1197 @@
+openapi: "3.0.3"
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: UPSC Buddy API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Auth / user profile
+  - name: questions
+    description: MCQ question bank
+  - name: practice
+    description: Practice sessions
+  - name: mockTests
+    description: Mock tests
+  - name: vocabulary
+    description: Vocabulary builder
+  - name: flashcards
+    description: Flashcard decks
+  - name: notes
+    description: Notes
+  - name: currentAffairs
+    description: Current affairs
+  - name: progress
+    description: Progress & stats
+  - name: studyLogs
+    description: Study logs / calendar
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /users/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get or create current user profile
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    patch:
+      operationId: updateMe
+      tags: [auth]
+      summary: Update current user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /questions:
+    get:
+      operationId: listQuestions
+      tags: [questions]
+      summary: List questions with filters
+      parameters:
+        - name: subject
+          in: query
+          schema: { type: string }
+        - name: difficulty
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Paginated questions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestionList"
+
+  /questions/random:
+    get:
+      operationId: getRandomQuestions
+      tags: [questions]
+      summary: Get random questions for a session
+      parameters:
+        - name: subject
+          in: query
+          schema: { type: string }
+        - name: difficulty
+          in: query
+          schema: { type: string }
+        - name: count
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        "200":
+          description: Random questions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Question"
+
+  /questions/{id}:
+    get:
+      operationId: getQuestion
+      tags: [questions]
+      summary: Get a single question
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Question
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Question"
+
+  /practice/sessions:
+    post:
+      operationId: createPracticeSession
+      tags: [practice]
+      summary: Start a new practice session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PracticeSessionInput"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PracticeSession"
+
+  /practice/sessions/{id}:
+    get:
+      operationId: getPracticeSession
+      tags: [practice]
+      summary: Get practice session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Practice session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PracticeSession"
+
+  /practice/attempts:
+    post:
+      operationId: submitAttempt
+      tags: [practice]
+      summary: Submit a question attempt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttemptInput"
+      responses:
+        "201":
+          description: Attempt recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Attempt"
+
+  /practice/weak-questions:
+    get:
+      operationId: listWeakQuestions
+      tags: [practice]
+      summary: Get questions user answered incorrectly
+      responses:
+        "200":
+          description: Weak questions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Question"
+
+  /mock-tests:
+    get:
+      operationId: listMockTests
+      tags: [mockTests]
+      summary: List user's mock tests
+      responses:
+        "200":
+          description: Mock tests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MockTest"
+    post:
+      operationId: createMockTest
+      tags: [mockTests]
+      summary: Start a new mock test
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MockTestInput"
+      responses:
+        "201":
+          description: Mock test created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MockTest"
+
+  /mock-tests/{id}:
+    get:
+      operationId: getMockTest
+      tags: [mockTests]
+      summary: Get mock test with answers and analysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Mock test detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MockTestDetail"
+    patch:
+      operationId: updateMockTest
+      tags: [mockTests]
+      summary: Submit mock test or add incidents
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MockTestUpdate"
+      responses:
+        "200":
+          description: Updated mock test
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MockTest"
+
+  /mock-tests/{id}/answers:
+    post:
+      operationId: submitMockAnswer
+      tags: [mockTests]
+      summary: Save an answer during mock test
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MockAnswerInput"
+      responses:
+        "201":
+          description: Answer saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MockAnswer"
+
+  /vocabulary:
+    get:
+      operationId: listVocabulary
+      tags: [vocabulary]
+      summary: List vocabulary words
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Vocabulary list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VocabularyList"
+
+  /vocabulary/daily:
+    get:
+      operationId: getDailyVocabulary
+      tags: [vocabulary]
+      summary: Get today's 10 vocabulary words
+      responses:
+        "200":
+          description: Daily words
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyWord"
+
+  /vocabulary/learned:
+    get:
+      operationId: listLearnedWords
+      tags: [vocabulary]
+      summary: List words the user has learned
+      responses:
+        "200":
+          description: Learned words
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyWord"
+
+  /vocabulary/{id}/learn:
+    post:
+      operationId: markWordLearned
+      tags: [vocabulary]
+      summary: Mark a word as learned
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WordLearnInput"
+      responses:
+        "200":
+          description: Marked learned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserVocabulary"
+
+  /flashcard-decks:
+    get:
+      operationId: listFlashcardDecks
+      tags: [flashcards]
+      summary: List user's flashcard decks
+      responses:
+        "200":
+          description: Decks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FlashcardDeck"
+    post:
+      operationId: createFlashcardDeck
+      tags: [flashcards]
+      summary: Create a flashcard deck
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlashcardDeckInput"
+      responses:
+        "201":
+          description: Deck created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashcardDeck"
+
+  /flashcard-decks/{id}:
+    get:
+      operationId: getFlashcardDeck
+      tags: [flashcards]
+      summary: Get deck with its cards
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Deck with cards
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashcardDeckDetail"
+    delete:
+      operationId: deleteFlashcardDeck
+      tags: [flashcards]
+      summary: Delete a deck
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Deleted
+
+  /flashcard-decks/{id}/cards:
+    post:
+      operationId: createFlashcard
+      tags: [flashcards]
+      summary: Add a card to a deck
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlashcardInput"
+      responses:
+        "201":
+          description: Card created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Flashcard"
+
+  /flashcard-decks/{id}/due:
+    get:
+      operationId: getDueFlashcards
+      tags: [flashcards]
+      summary: Get cards due for review today
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Due cards
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Flashcard"
+
+  /flashcards/{id}/review:
+    patch:
+      operationId: reviewFlashcard
+      tags: [flashcards]
+      summary: Record SRS review result
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlashcardReviewInput"
+      responses:
+        "200":
+          description: Updated card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Flashcard"
+
+  /notes:
+    get:
+      operationId: listNotes
+      tags: [notes]
+      summary: List user's notes
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: tag
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Notes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Note"
+    post:
+      operationId: createNote
+      tags: [notes]
+      summary: Create a note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteInput"
+      responses:
+        "201":
+          description: Note created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Note"
+
+  /notes/{id}:
+    get:
+      operationId: getNote
+      tags: [notes]
+      summary: Get a note
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Note
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Note"
+    patch:
+      operationId: updateNote
+      tags: [notes]
+      summary: Update a note
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteUpdate"
+      responses:
+        "200":
+          description: Updated note
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Note"
+    delete:
+      operationId: deleteNote
+      tags: [notes]
+      summary: Delete a note
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Deleted
+
+  /current-affairs:
+    get:
+      operationId: listCurrentAffairs
+      tags: [currentAffairs]
+      summary: List current affairs articles
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Articles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentAffairsList"
+
+  /current-affairs/bookmarks:
+    get:
+      operationId: listBookmarks
+      tags: [currentAffairs]
+      summary: List user's bookmarked articles
+      responses:
+        "200":
+          description: Bookmarked articles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CurrentAffair"
+
+  /current-affairs/{id}:
+    get:
+      operationId: getCurrentAffair
+      tags: [currentAffairs]
+      summary: Get a single article
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Article
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentAffair"
+
+  /current-affairs/{id}/bookmark:
+    post:
+      operationId: bookmarkArticle
+      tags: [currentAffairs]
+      summary: Bookmark an article
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Bookmarked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bookmark"
+    delete:
+      operationId: unbookmarkArticle
+      tags: [currentAffairs]
+      summary: Remove bookmark
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Removed
+
+  /progress/summary:
+    get:
+      operationId: getProgressSummary
+      tags: [progress]
+      summary: Get user's overall progress summary
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgressSummary"
+
+  /progress/subject-stats:
+    get:
+      operationId: getSubjectStats
+      tags: [progress]
+      summary: Get accuracy per subject
+      responses:
+        "200":
+          description: Subject stats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SubjectStat"
+
+  /progress/streak:
+    get:
+      operationId: getStreak
+      tags: [progress]
+      summary: Get current study streak
+      responses:
+        "200":
+          description: Streak info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreakInfo"
+
+  /progress/weekly:
+    get:
+      operationId: getWeeklyProgress
+      tags: [progress]
+      summary: Get daily question counts for this week
+      responses:
+        "200":
+          description: Weekly data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DayProgress"
+
+  /progress/badges:
+    get:
+      operationId: getBadges
+      tags: [progress]
+      summary: Get user's earned badges
+      responses:
+        "200":
+          description: Badges
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Badge"
+
+  /study-logs:
+    get:
+      operationId: listStudyLogs
+      tags: [studyLogs]
+      summary: List study logs
+      parameters:
+        - name: month
+          in: query
+          schema: { type: string, description: "YYYY-MM" }
+      responses:
+        "200":
+          description: Study logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StudyLog"
+    post:
+      operationId: upsertStudyLog
+      tags: [studyLogs]
+      summary: Create or update today's study log
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StudyLogInput"
+      responses:
+        "200":
+          description: Study log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudyLog"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+
+    User:
+      type: object
+      required: [id, clerkId, email, fullName, targetYear, createdAt]
+      properties:
+        id:         { type: integer }
+        clerkId:    { type: string }
+        email:      { type: string }
+        fullName:   { type: string }
+        avatarUrl:  { type: string, nullable: true }
+        targetYear: { type: integer }
+        bio:        { type: string, nullable: true }
+        createdAt:  { type: string }
+
+    UserUpdate:
+      type: object
+      properties:
+        fullName:   { type: string }
+        targetYear: { type: integer }
+        bio:        { type: string }
+        avatarUrl:  { type: string }
+
+    Question:
+      type: object
+      required: [id, subject, difficulty, questionText, options, correctOption, explanation]
+      properties:
+        id:            { type: integer }
+        subject:       { type: string }
+        difficulty:    { type: string }
+        questionText:  { type: string }
+        options:       { type: object }
+        correctOption: { type: string }
+        explanation:   { type: string }
+        source:        { type: string, nullable: true }
+
+    QuestionList:
+      type: object
+      required: [questions, total]
+      properties:
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Question"
+        total: { type: integer }
+
+    PracticeSessionInput:
+      type: object
+      required: [subject, difficulty]
+      properties:
+        subject:    { type: string }
+        difficulty: { type: string }
+        count:      { type: integer, default: 10 }
+
+    PracticeSession:
+      type: object
+      required: [id, subject, difficulty, questionIds, createdAt]
+      properties:
+        id:          { type: integer }
+        subject:     { type: string }
+        difficulty:  { type: string }
+        questionIds:
+          type: array
+          items: { type: integer }
+        createdAt:   { type: string }
+
+    AttemptInput:
+      type: object
+      required: [questionId, selectedOption, timeTakenSec]
+      properties:
+        questionId:     { type: integer }
+        selectedOption: { type: string }
+        timeTakenSec:   { type: integer }
+        sessionId:      { type: integer, nullable: true }
+
+    Attempt:
+      type: object
+      required: [id, questionId, selectedOption, isCorrect, timeTakenSec]
+      properties:
+        id:             { type: integer }
+        questionId:     { type: integer }
+        selectedOption: { type: string }
+        isCorrect:      { type: boolean }
+        timeTakenSec:   { type: integer }
+        attemptedAt:    { type: string }
+
+    MockTestInput:
+      type: object
+      required: [paperType]
+      properties:
+        paperType:      { type: string }
+        totalQuestions: { type: integer }
+
+    MockTest:
+      type: object
+      required: [id, paperType, totalQuestions, status, createdAt]
+      properties:
+        id:             { type: integer }
+        paperType:      { type: string }
+        score:          { type: integer, nullable: true }
+        totalQuestions: { type: integer }
+        timeTaken:      { type: integer, nullable: true }
+        status:         { type: string }
+        incidents:      { type: object, nullable: true }
+        createdAt:      { type: string }
+
+    MockTestUpdate:
+      type: object
+      properties:
+        score:     { type: integer }
+        timeTaken: { type: integer }
+        status:    { type: string }
+        incidents: { type: object }
+
+    MockTestDetail:
+      type: object
+      required: [id, paperType, totalQuestions, status, createdAt, answers]
+      properties:
+        id:             { type: integer }
+        paperType:      { type: string }
+        score:          { type: integer, nullable: true }
+        totalQuestions: { type: integer }
+        timeTaken:      { type: integer, nullable: true }
+        status:         { type: string }
+        incidents:      { type: object, nullable: true }
+        createdAt:      { type: string }
+        answers:
+          type: array
+          items:
+            $ref: "#/components/schemas/MockAnswer"
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Question"
+
+    MockAnswerInput:
+      type: object
+      required: [questionId, selectedOption]
+      properties:
+        questionId:      { type: integer }
+        selectedOption:  { type: string }
+        timeTakenSec:    { type: integer }
+        markedForReview: { type: boolean }
+
+    MockAnswer:
+      type: object
+      required: [id, questionId, selectedOption, isCorrect]
+      properties:
+        id:              { type: integer }
+        questionId:      { type: integer }
+        selectedOption:  { type: string }
+        isCorrect:       { type: boolean }
+        timeTakenSec:    { type: integer, nullable: true }
+        markedForReview: { type: boolean }
+
+    VocabularyWord:
+      type: object
+      required: [id, word, meaning, example]
+      properties:
+        id:           { type: integer }
+        word:         { type: string }
+        pronunciation:{ type: string, nullable: true }
+        partOfSpeech: { type: string, nullable: true }
+        meaning:      { type: string }
+        example:      { type: string }
+        mnemonic:     { type: string, nullable: true }
+        synonyms:     { type: string, nullable: true }
+        antonyms:     { type: string, nullable: true }
+        addedDate:    { type: string }
+
+    VocabularyList:
+      type: object
+      required: [words, total]
+      properties:
+        words:
+          type: array
+          items:
+            $ref: "#/components/schemas/VocabularyWord"
+        total: { type: integer }
+
+    WordLearnInput:
+      type: object
+      properties:
+        quizResult: { type: string }
+
+    UserVocabulary:
+      type: object
+      required: [id, wordId, learnedAt]
+      properties:
+        id:         { type: integer }
+        wordId:     { type: integer }
+        learnedAt:  { type: string }
+        quizResult: { type: string, nullable: true }
+
+    FlashcardDeckInput:
+      type: object
+      required: [title]
+      properties:
+        title:      { type: string }
+        subjectTag: { type: string }
+
+    FlashcardDeck:
+      type: object
+      required: [id, title, cardCount, createdAt]
+      properties:
+        id:         { type: integer }
+        title:      { type: string }
+        subjectTag: { type: string, nullable: true }
+        cardCount:  { type: integer }
+        createdAt:  { type: string }
+
+    FlashcardDeckDetail:
+      type: object
+      required: [id, title, cardCount, createdAt, cards]
+      properties:
+        id:         { type: integer }
+        title:      { type: string }
+        subjectTag: { type: string, nullable: true }
+        cardCount:  { type: integer }
+        createdAt:  { type: string }
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/Flashcard"
+
+    FlashcardInput:
+      type: object
+      required: [front, back]
+      properties:
+        front: { type: string }
+        back:  { type: string }
+
+    Flashcard:
+      type: object
+      required: [id, deckId, front, back, easeFactor, nextReviewAt]
+      properties:
+        id:           { type: integer }
+        deckId:       { type: integer }
+        front:        { type: string }
+        back:         { type: string }
+        easeFactor:   { type: number }
+        nextReviewAt: { type: string }
+
+    FlashcardReviewInput:
+      type: object
+      required: [rating]
+      properties:
+        rating: { type: string }
+
+    NoteInput:
+      type: object
+      required: [title]
+      properties:
+        title:   { type: string }
+        content: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+
+    NoteUpdate:
+      type: object
+      properties:
+        title:   { type: string }
+        content: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+
+    Note:
+      type: object
+      required: [id, title, updatedAt]
+      properties:
+        id:        { type: integer }
+        title:     { type: string }
+        content:   { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+        updatedAt: { type: string }
+
+    CurrentAffair:
+      type: object
+      required: [id, title, summary, category, publishedAt]
+      properties:
+        id:           { type: integer }
+        title:        { type: string }
+        summary:      { type: string }
+        upscTags:
+          type: array
+          items: { type: string }
+        category:     { type: string }
+        sourceUrl:    { type: string, nullable: true }
+        publishedAt:  { type: string }
+        generatedMcq: { type: object, nullable: true }
+        isBookmarked: { type: boolean }
+
+    CurrentAffairsList:
+      type: object
+      required: [articles, total]
+      properties:
+        articles:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurrentAffair"
+        total: { type: integer }
+
+    Bookmark:
+      type: object
+      required: [id, articleId, bookmarkedAt]
+      properties:
+        id:           { type: integer }
+        articleId:    { type: integer }
+        bookmarkedAt: { type: string }
+
+    ProgressSummary:
+      type: object
+      required: [totalAttempted, totalCorrect, totalMockTests, vocabLearned, studyDays, currentStreak, accuracyPct]
+      properties:
+        totalAttempted: { type: integer }
+        totalCorrect:   { type: integer }
+        totalMockTests: { type: integer }
+        vocabLearned:   { type: integer }
+        studyDays:      { type: integer }
+        currentStreak:  { type: integer }
+        accuracyPct:    { type: number }
+
+    SubjectStat:
+      type: object
+      required: [subject, attempted, correct, accuracyPct]
+      properties:
+        subject:     { type: string }
+        attempted:   { type: integer }
+        correct:     { type: integer }
+        accuracyPct: { type: number }
+
+    StreakInfo:
+      type: object
+      required: [currentStreak, longestStreak]
+      properties:
+        currentStreak:  { type: integer }
+        longestStreak:  { type: integer }
+        lastStudyDate:  { type: string, nullable: true }
+
+    DayProgress:
+      type: object
+      required: [date, questionsAttempted]
+      properties:
+        date:               { type: string }
+        questionsAttempted: { type: integer }
+        mockTests:          { type: integer }
+
+    Badge:
+      type: object
+      required: [id, name, description, earnedAt]
+      properties:
+        id:          { type: string }
+        name:        { type: string }
+        description: { type: string }
+        earnedAt:    { type: string }
+
+    StudyLogInput:
+      type: object
+      required: [date]
+      properties:
+        date:               { type: string }
+        subjectsStudied:
+          type: array
+          items: { type: string }
+        questionsAttempted: { type: integer }
+        notes:              { type: string }
+        mood:               { type: string }
+        targetMet:          { type: boolean }
+
+    StudyLog:
+      type: object
+      required: [id, date, createdAt]
+      properties:
+        id:                 { type: integer }
+        date:               { type: string }
+        subjectsStudied:
+          type: array
+          items: { type: string }
+        questionsAttempted: { type: integer, nullable: true }
+        notes:              { type: string, nullable: true }
+        mood:               { type: string, nullable: true }
+        targetMet:          { type: boolean, nullable: true }
+        createdAt:          { type: string }
