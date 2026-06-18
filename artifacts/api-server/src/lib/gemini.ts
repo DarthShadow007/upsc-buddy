@@ -4,15 +4,18 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 export async function generateQuestionsForSubject(subject: string, count: number, specificDifficulty?: string) {
+  // THE FIX: If the subject is CSAT, force the count to a maximum of 3 so the AI doesn't choke on massive text.
+  const safeCount = subject === "CSAT" ? Math.min(count, 3) : count;
+
   const schema = {
     type: SchemaType.ARRAY,
-    description: `List of ${count} UPSC Civil Services Exam questions for the subject: ${subject}.`,
+    description: `List of ${safeCount} UPSC Civil Services Exam questions for the subject: ${subject}.`,
     items: {
       type: SchemaType.OBJECT,
       properties: {
         subject: { type: SchemaType.STRING },
         difficulty: { type: SchemaType.STRING, description: "'easy', 'medium', or 'hard'" },
-        question: { type: SchemaType.STRING, description: "The MCQ text. For CSAT, include the passage if necessary." },
+        question: { type: SchemaType.STRING, description: "The MCQ text." },
         options: { 
             type: SchemaType.OBJECT, 
             properties: { A: { type: SchemaType.STRING }, B: { type: SchemaType.STRING }, C: { type: SchemaType.STRING }, D: { type: SchemaType.STRING } },
@@ -25,7 +28,7 @@ export async function generateQuestionsForSubject(subject: string, count: number
     },
   } as ResponseSchema; 
 
-  let prompt = `Generate exactly ${count} realistic, UPSC CSE Prelims level multiple-choice questions for the subject: "${subject}".`;
+  let prompt = `Generate exactly ${safeCount} realistic, UPSC CSE Prelims level multiple-choice questions for the subject: "${subject}".`;
   
   if (specificDifficulty) {
     prompt += ` IMPORTANT: All generated questions MUST strictly be of "${specificDifficulty}" difficulty level.`;
@@ -33,8 +36,9 @@ export async function generateQuestionsForSubject(subject: string, count: number
     prompt += ` Include a mixed variety of difficulty levels (easy, medium, hard).`;
   }
 
+  // Strict text-length limits for CSAT
   if (subject === "CSAT") {
-    prompt += ` Keep reading comprehension passages relatively short to prevent text cutoff.`;
+    prompt += ` CRITICAL: For reading comprehension, passages MUST be strictly under 100 words. Keep questions concise so the JSON response does not get cut off. Ensure the JSON array is properly closed.`;
   }
 
   try {
@@ -48,7 +52,6 @@ export async function generateQuestionsForSubject(subject: string, count: number
     });
 
     let rawText = result.response.text();
-    // Safely remove markdown formatting using string replacement instead of regex
     rawText = rawText.split("```json").join("").split("```").join("").trim();
 
     return JSON.parse(rawText);
