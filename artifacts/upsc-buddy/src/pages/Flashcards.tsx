@@ -3,194 +3,240 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Layers, RotateCcw, ThumbsUp, ThumbsDown, Minus, ChevronLeft } from "lucide-react";
-import { mockFlashcardDecks } from "@/lib/mockData";
+import { Layers, Lightbulb, ArrowLeft, BrainCircuit } from "lucide-react";
+import { useUser } from "@clerk/react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 
-type View = "decks" | "study";
+// ── Types ──────────────────────────────────────────────────────────────────
+interface Flashcard {
+  id: string;
+  front: string;
+  back: string;
+  nextReviewAt: string;
+}
 
+interface Deck {
+  id: string;
+  title: string;
+  subjectTag: string;
+  cards: Flashcard[];
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────
 export default function Flashcards() {
-  const [view, setView] = useState<View>("decks");
-  const [activeDeck, setActiveDeck] = useState(mockFlashcardDecks[0]);
-  const [cardIdx, setCardIdx] = useState(0);
-  const [flipped, setFlipped] = useState(false);
-  const [ratings, setRatings] = useState<Record<number, "easy" | "hard" | "skip">>({});
-  const [done, setDone] = useState(false);
+  const { user } = useUser();
+  const queryClient = useQueryClient();
 
-  const cards = activeDeck.cards;
-  const current = cards[cardIdx];
-  const progress = (cardIdx / cards.length) * 100;
+  const [activeDeck, setActiveDeck] = useState<Deck | null>(null);
+  const [currentCardIdx, setCurrentCardIdx] = useState(0);
+  const [isFlipped, setIsFlipped] = useState(false);
 
-  const startDeck = (deck: typeof mockFlashcardDecks[0]) => {
+  // Fetch all decks for the user
+  const { data: decks, isLoading } = useQuery<Deck[]>({
+    queryKey: ["flashcardDecks", user?.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/flashcards/${user?.id}/decks`);
+      if (!res.ok) throw new Error("Failed to fetch decks");
+      return res.json();
+    },
+    enabled: !!user?.id,
+  });
+
+  // Review Mutation
+  const reviewMutation = useMutation({
+    mutationFn: async (payload: { cardId: string; result: "easy" | "hard" | "again" }) => {
+      const res = await fetch("/api/flashcards/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clerkId: user?.id, ...payload }),
+      });
+      if (!res.ok) throw new Error("Failed to review card");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["flashcardDecks"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboardStats"] }); // Updates Daily Targets!
+    },
+  });
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+  const handleStudyClick = (deck: Deck) => {
     setActiveDeck(deck);
-    setCardIdx(0);
-    setFlipped(false);
-    setRatings({});
-    setDone(false);
-    setView("study");
+    setCurrentCardIdx(0);
+    setIsFlipped(false);
   };
 
-  const rate = (r: "easy" | "hard" | "skip") => {
-    setRatings(prev => ({ ...prev, [cardIdx]: r }));
-    if (cardIdx + 1 >= cards.length) {
-      setDone(true);
+  const handleReview = (result: "easy" | "hard" | "again") => {
+    if (!activeDeck) return;
+    const currentCard = activeDeck.cards[currentCardIdx];
+
+    // Trigger backend SRS update
+    reviewMutation.mutate({ cardId: currentCard.id, result });
+
+    // Move to next card
+    if (currentCardIdx + 1 < activeDeck.cards.length) {
+      setIsFlipped(false);
+      setCurrentCardIdx((prev) => prev + 1);
     } else {
-      setCardIdx(i => i + 1);
-      setFlipped(false);
+      // Finished deck for today
+      setActiveDeck(null);
     }
   };
 
-  if (view === "decks") return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-          <Layers className="w-6 h-6 text-primary" /> Flashcard Decks
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">Spaced repetition system for long-term retention</p>
-      </div>
+  // ── Loading State ───────────────────────────────────────────────────────
+  if (isLoading) {
+    return <div className="flex justify-center p-12 text-muted-foreground">Loading your decks...</div>;
+  }
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {mockFlashcardDecks.map(deck => {
-          const masteredPct = Math.round((deck.mastered / deck.totalCards) * 100);
-          return (
-            <Card key={deck.id} className="hover:shadow-md transition-shadow" data-testid={`deck-card-${deck.id}`}>
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
-                    <Layers className="w-5 h-5 text-primary" />
-                  </div>
-                  <Badge variant="outline" className="text-xs">{deck.subject}</Badge>
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">{deck.title}</h3>
-                <p className="text-xs text-muted-foreground mb-3">{deck.totalCards} cards total</p>
-                <div className="space-y-2 mb-4">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Mastered</span>
-                    <span>{deck.mastered}/{deck.totalCards} ({masteredPct}%)</span>
-                  </div>
-                  <Progress value={masteredPct} className="h-1.5" />
-                </div>
-                {deck.dueToday > 0 && (
-                  <div className="flex items-center gap-1.5 mb-3">
-                    <div className="w-2 h-2 bg-amber-500 rounded-full" />
-                    <span className="text-xs text-amber-600 font-medium">{deck.dueToday} cards due today</span>
-                  </div>
-                )}
-                <Button onClick={() => startDeck(deck)} className="w-full" size="sm" data-testid={`button-study-deck-${deck.id}`}>
-                  Study Now
-                </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+  // ── Study Mode UI ───────────────────────────────────────────────────────
+  if (activeDeck) {
+    const currentCard = activeDeck.cards[currentCardIdx];
+    
+    if (!currentCard) {
+       setActiveDeck(null);
+       return null;
+    }
 
-      <Card className="bg-muted/50">
-        <CardContent className="p-4">
-          <p className="text-sm text-muted-foreground text-center">
-            💡 SRS algorithm will automatically schedule cards based on your performance when connected to the backend.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
-  );
-
-  if (done) {
-    const easy = Object.values(ratings).filter(r => r === "easy").length;
-    const hard = Object.values(ratings).filter(r => r === "hard").length;
-    const skip = Object.values(ratings).filter(r => r === "skip").length;
     return (
-      <div className="max-w-sm mx-auto space-y-6 text-center py-8">
-        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
-          <ThumbsUp className="w-8 h-8 text-green-600" />
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <Button variant="ghost" onClick={() => setActiveDeck(null)} className="text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="w-4 h-4 mr-2" /> Back to Decks
+          </Button>
+          <Badge variant="outline">{activeDeck.subjectTag}</Badge>
         </div>
-        <div>
-          <h2 className="text-xl font-bold text-foreground">Deck Complete!</h2>
-          <p className="text-muted-foreground text-sm mt-1">{activeDeck.title}</p>
+
+        <div className="flex justify-between items-center text-sm text-muted-foreground">
+          <p>Card {currentCardIdx + 1} of {activeDeck.cards.length}</p>
+          <p>Deck: {activeDeck.title}</p>
         </div>
-        <Card>
-          <CardContent className="p-4 grid grid-cols-3 gap-3 text-center">
-            <div>
-              <p className="text-2xl font-bold text-green-600">{easy}</p>
-              <p className="text-xs text-muted-foreground">Easy</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-amber-600">{skip}</p>
-              <p className="text-xs text-muted-foreground">Okay</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-red-600">{hard}</p>
-              <p className="text-xs text-muted-foreground">Hard</p>
-            </div>
-          </CardContent>
-        </Card>
-        <div className="flex gap-3">
-          <Button variant="outline" onClick={() => setView("decks")} className="flex-1" data-testid="button-back-to-decks">Back</Button>
-          <Button onClick={() => startDeck(activeDeck)} className="flex-1" data-testid="button-study-again">
-            <RotateCcw className="w-4 h-4 mr-1.5" /> Again
+        <Progress value={((currentCardIdx) / activeDeck.cards.length) * 100} className="h-1.5" />
+
+        {/* The Flashcard */}
+        <div 
+          className="relative min-h-[350px] w-full perspective-1000 cursor-pointer"
+          onClick={() => !isFlipped && setIsFlipped(true)}
+        >
+          <Card className={cn(
+            "absolute inset-0 w-full h-full transition-all duration-500 transform-style-3d",
+            isFlipped ? "[transform:rotateY(180deg)]" : ""
+          )}>
+            
+            {/* Front of Card */}
+            <CardContent className={cn(
+              "absolute inset-0 flex flex-col items-center justify-center p-8 text-center backface-hidden",
+              isFlipped && "opacity-0 pointer-events-none"
+            )}>
+              <BrainCircuit className="w-12 h-12 text-primary/20 mb-6" />
+              <h2 className="text-xl font-medium text-foreground">{currentCard.front}</h2>
+              <p className="absolute bottom-6 text-sm text-muted-foreground animate-pulse">Click anywhere to flip</p>
+            </CardContent>
+
+            {/* Back of Card */}
+            <CardContent className={cn(
+              "absolute inset-0 flex flex-col items-center justify-center p-8 text-center backface-hidden [transform:rotateY(180deg)]",
+              !isFlipped && "opacity-0 pointer-events-none"
+            )}>
+              <div className="w-full text-left space-y-4 overflow-y-auto max-h-[250px] scrollbar-thin">
+                <p className="text-base text-foreground whitespace-pre-wrap">{currentCard.back}</p>
+              </div>
+            </CardContent>
+            
+          </Card>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex gap-4 justify-center pt-4">
+          <Button 
+            disabled={!isFlipped || reviewMutation.isPending} 
+            onClick={() => handleReview("again")}
+            variant="outline"
+            className="w-32 border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-red-900 dark:hover:bg-red-950"
+          >
+            Again (1d)
+          </Button>
+          <Button 
+            disabled={!isFlipped || reviewMutation.isPending} 
+            onClick={() => handleReview("hard")}
+            variant="outline"
+            className="w-32 border-amber-200 hover:bg-amber-50 hover:text-amber-600 dark:border-amber-900 dark:hover:bg-amber-950"
+          >
+            Hard (2d+)
+          </Button>
+          <Button 
+            disabled={!isFlipped || reviewMutation.isPending} 
+            onClick={() => handleReview("easy")}
+            variant="outline"
+            className="w-32 border-green-200 hover:bg-green-50 hover:text-green-600 dark:border-green-900 dark:hover:bg-green-950"
+          >
+            Easy (4d+)
           </Button>
         </div>
       </div>
     );
   }
 
+  // ── Grid View UI ────────────────────────────────────────────────────────
   return (
-    <div className="max-w-lg mx-auto space-y-5">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => setView("decks")} data-testid="button-back-decks">
-          <ChevronLeft className="w-4 h-4 mr-1" /> Decks
-        </Button>
-        <div className="flex-1">
-          <div className="flex justify-between text-xs text-muted-foreground mb-1">
-            <span>{activeDeck.title}</span>
-            <span>{cardIdx + 1}/{cards.length}</span>
+    <div className="max-w-6xl mx-auto space-y-8">
+      <div>
+        <h1 className="text-3xl font-bold flex items-center gap-3">
+          <Layers className="w-8 h-8 text-amber-500" />
+          Flashcard Decks
+        </h1>
+        <p className="text-muted-foreground mt-2">Spaced repetition system for long-term retention. Decks auto-generate based on your practice mistakes.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {decks?.map((deck) => {
+          const totalCards = deck.cards.length; // In a real app, you'd aggregate a true total vs due, but here cards[] is filtered to what's due today by the backend route
+          const dueToday = deck.cards.length; 
+          
+          if (dueToday === 0) return null; // Hide decks with nothing due
+
+          return (
+            <Card key={deck.id} className="flex flex-col border-border/50 bg-card/50">
+              <CardHeader className="pb-4">
+                <div className="flex justify-between items-start mb-2">
+                  <div className="p-2 bg-amber-500/10 rounded-lg">
+                    <Layers className="w-5 h-5 text-amber-500" />
+                  </div>
+                  <Badge variant="outline" className="bg-background">{deck.subjectTag}</Badge>
+                </div>
+                <CardTitle className="text-lg font-bold">{deck.title}</CardTitle>
+                <p className="text-sm text-muted-foreground">{totalCards} cards due for review</p>
+              </CardHeader>
+              
+              <CardContent className="mt-auto pt-4 border-t border-border/50">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  <span className="text-sm font-medium text-amber-500">{dueToday} cards due today</span>
+                </div>
+                <Button 
+                  onClick={() => handleStudyClick(deck)} 
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold"
+                >
+                  Study Now
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
+
+        {(!decks || decks.filter(d => d.cards.length > 0).length === 0) && (
+          <div className="col-span-full text-center py-12 bg-muted/30 rounded-xl border border-dashed">
+            <Lightbulb className="w-10 h-10 text-muted-foreground mx-auto mb-3 opacity-50" />
+            <h3 className="text-lg font-medium text-foreground">You're all caught up!</h3>
+            <p className="text-muted-foreground mt-1">No flashcards due for review right now. Go do some practice questions to build your decks!</p>
           </div>
-          <Progress value={progress} className="h-1.5" />
-        </div>
+        )}
       </div>
 
-      <div
-        className="relative cursor-pointer"
-        onClick={() => setFlipped(f => !f)}
-        data-testid="flashcard-container"
-        style={{ perspective: "1000px" }}
-      >
-        <div className={cn("relative transition-all duration-500", flipped && "[transform:rotateY(180deg)]")}
-          style={{ transformStyle: "preserve-3d" }}>
-          <Card className="min-h-56 flex items-center justify-center p-8" style={{ backfaceVisibility: "hidden" }}>
-            <CardContent className="p-0 text-center">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-3">Front</p>
-              <p className="text-xl font-bold text-foreground" data-testid="card-front">{current.front}</p>
-              <p className="text-xs text-muted-foreground mt-4">Tap to reveal answer</p>
-            </CardContent>
-          </Card>
-          <Card className="min-h-56 flex items-center justify-center p-8 absolute inset-0 bg-primary/5 border-primary/30"
-            style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}>
-            <CardContent className="p-0 text-center">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-3">Answer</p>
-              <p className="text-base text-foreground leading-relaxed" data-testid="card-back">{current.back}</p>
-            </CardContent>
-          </Card>
-        </div>
+      <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4 text-center flex items-center justify-center gap-2">
+        <Lightbulb className="w-4 h-4 text-amber-500" />
+        <span className="text-sm text-slate-300">SRS algorithm will automatically schedule cards based on your performance when connected to the backend.</span>
       </div>
-
-      {flipped ? (
-        <div className="flex gap-3">
-          <Button onClick={() => rate("hard")} variant="outline" className="flex-1 border-red-300 text-red-600 hover:bg-red-50" data-testid="button-rate-hard">
-            <ThumbsDown className="w-4 h-4 mr-1.5" /> Hard
-          </Button>
-          <Button onClick={() => rate("skip")} variant="outline" className="flex-1" data-testid="button-rate-okay">
-            <Minus className="w-4 h-4 mr-1.5" /> Okay
-          </Button>
-          <Button onClick={() => rate("easy")} className="flex-1 bg-green-600 hover:bg-green-700" data-testid="button-rate-easy">
-            <ThumbsUp className="w-4 h-4 mr-1.5" /> Easy
-          </Button>
-        </div>
-      ) : (
-        <Button onClick={() => setFlipped(true)} className="w-full" variant="outline" data-testid="button-show-answer">
-          Show Answer
-        </Button>
-      )}
     </div>
   );
 }

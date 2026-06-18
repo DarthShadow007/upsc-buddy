@@ -39,6 +39,7 @@ model Question {
   isAIGenerated Boolean  @default(false)
   createdAt     DateTime @default(now())
   attempts      UserQuestionAttempt[]
+  flashcards    Flashcard[]
 }
 
 model UserQuestionAttempt {
@@ -53,13 +54,36 @@ model UserQuestionAttempt {
 }
 
 model DailyStudyLog {
-  id                 String   @id @default(uuid())
+  id                 String  @id @default(uuid())
   clerkUserId        String
   date               String
-  questionsAttempted Int      @default(0)
-  flashcardsReviewed Int      @default(0)
-  currentAffairsRead Boolean  @default(false)
-  mockTestCompleted  Boolean  @default(false)
-  studyMinutes       Int      @default(0)
+  questionsAttempted Int     @default(0)
+  flashcardsReviewed Int     @default(0)
+  currentAffairsRead Boolean @default(false)
+  mockTestCompleted  Boolean @default(false)
+  studyMinutes       Int     @default(0)
   @@unique([clerkUserId, date])
+}
+
+model FlashcardDeck {
+  id          String      @id @default(uuid())
+  clerkUserId String
+  title       String
+  subjectTag  String
+  isAutoGen   Boolean     @default(false)
+  cards       Flashcard[]
+}
+
+model Flashcard {
+  id               String        @id @default(uuid())
+  deckId           String
+  deck             FlashcardDeck @relation(fields: [deckId], references: [id])
+  front            String
+  back             String
+  easeFactor       Float         @default(2.5)
+  interval         Int           @default(1)
+  nextReviewAt     DateTime      @default(now())
+  lastResult       String?
+  sourceQuestionId String?
+  sourceQuestion   Question?     @relation(fields: [sourceQuestionId], references: [id])
 }
