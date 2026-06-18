@@ -1,77 +1,107 @@
 import { Router } from "express";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 
 const router = Router();
-const prisma = new PrismaClient();
 
-// Fetch all decks for a user with the count of cards due today
+// GET all decks for a user with cards due for review
 router.get("/:clerkId/decks", async (req, res) => {
   try {
     const { clerkId } = req.params;
-    const today = new Date();
 
-    // Change this block in your GET /:clerkId/decks route
     const decks = await prisma.flashcardDeck.findMany({
       where: { clerkUserId: clerkId },
       include: {
         cards: {
-          // Remove the date filter for testing to see if cards show up
-          where: { NOT: { id: "" } }, 
+          where: {
+            nextReviewAt: {
+              lte: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            },
+          },
+          orderBy: { nextReviewAt: "asc" },
         },
       },
+      // NO orderBy createdAt — field doesn't exist in schema
     });
 
-    res.json(decks);
+    const decksWithCards = decks.filter((d) => d.cards.length > 0);
+    res.json(decksWithCards);
   } catch (error) {
+    console.error("Flashcard fetch error:", error);
     res.status(500).json({ error: "Failed to fetch decks" });
   }
 });
 
-// Update a flashcard after review (Spaced Repetition & Daily Goals)
+// POST review a card — update SRS interval
 router.post("/review", async (req, res) => {
   try {
-    const { clerkId, cardId, result } = req.body; 
-    
+    const { clerkId, cardId, result } = req.body;
+
     const card = await prisma.flashcard.findUnique({ where: { id: cardId } });
     if (!card) return res.status(404).json({ error: "Card not found" });
 
     let { easeFactor, interval } = card;
 
-    // Super basic Spaced Repetition (SRS) math
     if (result === "easy") {
       interval = Math.max(1, Math.round(interval * easeFactor));
-      easeFactor += 0.15;
+      easeFactor = Math.min(3.0, easeFactor + 0.15);
     } else if (result === "hard") {
       interval = Math.max(1, Math.round(interval * 1.2));
-      easeFactor -= 0.15;
-    } else { // "again"
+      easeFactor = Math.max(1.3, easeFactor - 0.15);
+    } else {
       interval = 1;
-      easeFactor -= 0.20;
+      easeFactor = Math.max(1.3, easeFactor - 0.2);
     }
 
-    // Ensure easeFactor doesn't drop too low and make cards appear too often
-    easeFactor = Math.max(1.3, easeFactor);
-
-    // Calculate next review date
     const nextReviewAt = new Date();
     nextReviewAt.setDate(nextReviewAt.getDate() + interval);
 
-    const updatedCard = await prisma.flashcard.update({
+    await prisma.flashcard.update({
       where: { id: cardId },
       data: { easeFactor, interval, nextReviewAt, lastResult: result },
     });
 
-    // Update the Daily Study Log for the Dashboard Progress Bar
-    const istDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const istDate = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+
     await prisma.dailyStudyLog.upsert({
       where: { clerkUserId_date: { clerkUserId: clerkId, date: istDate } },
       update: { flashcardsReviewed: { increment: 1 } },
-      create: { clerkUserId: clerkId, date: istDate, flashcardsReviewed: 1 }
+      create: { clerkUserId: clerkId, date: istDate, flashcardsReviewed: 1 },
     });
 
-    res.json({ success: true, nextReviewAt: updatedCard.nextReviewAt });
+    res.json({ success: true, nextReviewAt, interval });
   } catch (error) {
+    console.error("Flashcard review error:", error);
     res.status(500).json({ error: "Failed to update review" });
+  }
+});
+
+// POST create a custom deck manually
+router.post("/deck", async (req, res) => {
+  try {
+    const { clerkId, title, subjectTag } = req.body;
+    const deck = await prisma.flashcardDeck.create({
+      data: { clerkUserId: clerkId, title, subjectTag, isAutoGen: false },
+    });
+    res.json(deck);
+  } catch (error) {
+    console.error("Deck create error:", error);
+    res.status(500).json({ error: "Failed to create deck" });
+  }
+});
+
+// POST add a card to a deck manually
+router.post("/card", async (req, res) => {
+  try {
+    const { deckId, front, back } = req.body;
+    const card = await prisma.flashcard.create({
+      data: { deckId, front, back, easeFactor: 2.5, interval: 1, nextReviewAt: new Date() },
+    });
+    res.json(card);
+  } catch (error) {
+    console.error("Card create error:", error);
+    res.status(500).json({ error: "Failed to create card" });
   }
 });
 
