@@ -1,219 +1,678 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Clock, AlertCircle, CheckCircle, Trophy, Play, RotateCcw, BookOpen } from "lucide-react";
-import { mockQuestions } from "@/lib/mockData";
+import {
+  Clock, AlertCircle, CheckCircle, Trophy, RotateCcw,
+  BookOpen, Loader2, Camera, CameraOff, Flag, ChevronRight,
+  ChevronLeft, AlertTriangle, Eye, Shield
+} from "lucide-react";
+import { useUser } from "@clerk/react";
 import { cn } from "@/lib/utils";
 
-type Mode = "home" | "running" | "result";
+type Mode = "home" | "setup" | "generating" | "running" | "result";
+type PaperType = "GS1" | "CSAT";
 
-const MOCK_TESTS = [
-  { id: 1, title: "UPSC Prelims Mock 1", questions: 8, duration: 8, subject: "Mixed", difficulty: "hard" as const },
-  { id: 2, title: "Polity Special Test", questions: 5, duration: 5, subject: "Polity", difficulty: "medium" as const },
-  { id: 3, title: "History & Geography", questions: 6, duration: 6, subject: "Mixed", difficulty: "medium" as const },
-];
+interface MockQuestion {
+  id: string;
+  subject: string;
+  difficulty: string;
+  questionType: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  explanation: string;
+}
+
+interface ProctoringIncident {
+  type: string;
+  time: number;
+  message: string;
+}
+
+interface ResultData {
+  score: number;
+  maxScore: number;
+  attempted: number;
+  skipped: number;
+  accuracy: number;
+  rankEstimate: string;
+  subjectBreakdown: { subject: string; correct: number; total: number; accuracy: number }[];
+  incidents: number;
+}
+
+const PAPER_INFO = {
+  GS1: { title: "GS Paper I", questions: 100, duration: 120, color: "blue", desc: "History, Geography, Polity, Economy, Environment, Science & Art" },
+  CSAT: { title: "CSAT Paper II", questions: 80, duration: 120, color: "purple", desc: "Comprehension, Logical Reasoning, Maths & Data Interpretation" },
+};
 
 export default function MockTest() {
+  const { user } = useUser();
   const [mode, setMode] = useState<Mode>("home");
-  const [selectedTest, setSelectedTest] = useState(MOCK_TESTS[0]);
+  const [paperType, setPaperType] = useState<PaperType>("GS1");
+  const [mockTestId, setMockTestId] = useState<string>("");
+  const [questions, setQuestions] = useState<MockQuestion[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [answers, setAnswers] = useState<Record<string, number | null>>({});
+  const [flagged, setFlagged] = useState<Set<string>>(new Set());
   const [timeLeft, setTimeLeft] = useState(0);
-  const [flagged, setFlagged] = useState<Set<number>>(new Set());
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [webcamActive, setWebcamActive] = useState(false);
+  const [incidents, setIncidents] = useState<ProctoringIncident[]>([]);
+  const [warnings, setWarnings] = useState(0);
+  const [showWarning, setShowWarning] = useState<string | null>(null);
+  const [resultData, setResultData] = useState<ResultData | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
 
-  const questions = mockQuestions.slice(0, selectedTest.questions);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const warningCountRef = useRef(0);
 
-  const endTest = useCallback(() => setMode("result"), []);
+  // ── Load history on home screen ─────────────────────────────────────────
+  useEffect(() => {
+    if (mode === "home" && user?.id) {
+      fetch(`/api/mocktest/history/${user.id}`)
+        .then((r) => r.json())
+        .then(setHistory)
+        .catch(() => {});
+    }
+  }, [mode, user?.id]);
 
+  // ── Timer ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (mode !== "running") return;
     const interval = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) { clearInterval(interval); endTest(); return 0; }
+      setTimeLeft((t) => {
+        if (t <= 1) {
+          clearInterval(interval);
+          handleSubmit(true);
+          return 0;
+        }
         return t - 1;
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [mode, endTest]);
+  }, [mode]);
 
-  const startTest = (test: typeof MOCK_TESTS[0]) => {
-    setSelectedTest(test);
+  // ── Tab switch detection ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (mode !== "running") return;
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        addIncident("tab_switch", "⚠️ Tab switch detected! Stay focused on the exam.");
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [mode]);
+
+  // ── Fullscreen detection ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (mode !== "running") return;
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        addIncident("fullscreen_exit", "⚠️ Fullscreen exited! Please return to fullscreen.");
+      }
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, [mode]);
+
+  const addIncident = useCallback((type: string, message: string) => {
+    const incident = { type, time: Date.now(), message };
+    setIncidents((prev) => [...prev, incident]);
+    warningCountRef.current += 1;
+    setWarnings(warningCountRef.current);
+    setShowWarning(message);
+    setTimeout(() => setShowWarning(null), 4000);
+
+    // 3 strikes — auto submit
+    if (warningCountRef.current >= 3) {
+      setTimeout(() => handleSubmit(true), 2000);
+    }
+  }, []);
+
+  // ── Start webcam ─────────────────────────────────────────────────────────
+  const startWebcam = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      setWebcamActive(true);
+    } catch {
+      setWebcamActive(false);
+    }
+  };
+
+  const stopWebcam = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    setWebcamActive(false);
+  };
+
+  // ── Generate mock test ────────────────────────────────────────────────────
+  const generateTest = async (type: PaperType) => {
+    setPaperType(type);
+    setMode("generating");
+
+    try {
+      const res = await fetch("/api/mocktest/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clerkId: user?.id, paperType: type }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      setMockTestId(data.mockTestId);
+      setQuestions(data.questions);
+      setAnswers({});
+      setFlagged(new Set());
+      setIncidents([]);
+      setWarnings(0);
+      warningCountRef.current = 0;
+      setTimeLeft(PAPER_INFO[type].duration * 60);
+      setMode("setup");
+    } catch (err) {
+      alert("Failed to generate test. Please try again.");
+      setMode("home");
+    }
+  };
+
+  // ── Start exam ────────────────────────────────────────────────────────────
+  const startExam = async () => {
+    await startWebcam();
+    try {
+      await document.documentElement.requestFullscreen();
+      setIsFullscreen(true);
+    } catch {}
     setCurrentIdx(0);
-    setAnswers({});
-    setFlagged(new Set());
-    setTimeLeft(test.duration * 60);
     setMode("running");
   };
 
-  const formatTime = (s: number) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
-  const score = questions.filter((q, i) => answers[i] === q.correctAnswer).length;
-  const attempted = Object.keys(answers).length;
-  const accuracy = attempted > 0 ? Math.round((score / attempted) * 100) : 0;
+  // ── Submit exam ───────────────────────────────────────────────────────────
+  const handleSubmit = useCallback(async (autoSubmit = false) => {
+    if (submitting) return;
+    setSubmitting(true);
+    stopWebcam();
 
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+    } catch {}
+
+    try {
+      const res = await fetch("/api/mocktest/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mockTestId,
+          clerkId: user?.id,
+          answers,
+          timeTaken: PAPER_INFO[paperType].duration * 60 - timeLeft,
+          incidents,
+        }),
+      });
+      const data = await res.json();
+      setResultData(data);
+      setMode("result");
+    } catch {
+      alert("Failed to submit. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [mockTestId, user?.id, answers, incidents, timeLeft, paperType, submitting]);
+
+  const formatTime = (s: number) =>
+    `${Math.floor(s / 3600).toString().padStart(2, "0")}:${Math.floor((s % 3600) / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
+
+  const timerColor = timeLeft < 300 ? "text-red-500" : timeLeft < 900 ? "text-amber-500" : "text-green-400";
+
+  // ── HOME ─────────────────────────────────────────────────────────────────
   if (mode === "home") return (
-    <div className="space-y-6">
+    <div className="max-w-4xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Mock Tests</h1>
-        <p className="text-muted-foreground text-sm mt-1">Simulate real UPSC exam conditions</p>
+        <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+          <Shield className="w-8 h-8 text-primary" /> Mock Tests
+        </h1>
+        <p className="text-muted-foreground mt-2">AI-proctored UPSC-level exams. Every test is unique.</p>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {MOCK_TESTS.map(test => (
-          <Card key={test.id} className="hover:shadow-md transition-shadow" data-testid={`test-card-${test.id}`}>
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between mb-3">
-                <BookOpen className="w-8 h-8 text-primary bg-primary/10 p-1.5 rounded-lg" />
-                <Badge className={cn("text-xs capitalize", test.difficulty === "hard" ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300" : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300")}>{test.difficulty}</Badge>
-              </div>
-              <h3 className="font-semibold text-foreground mb-1">{test.title}</h3>
-              <p className="text-xs text-muted-foreground mb-3">{test.subject}</p>
-              <div className="flex items-center justify-between text-xs text-muted-foreground mb-4">
-                <span>{test.questions} questions</span>
-                <span>{test.duration} mins</span>
-              </div>
-              <Button onClick={() => startTest(test)} className="w-full" size="sm" data-testid={`button-start-test-${test.id}`}>
-                <Play className="w-3.5 h-3.5 mr-1.5" /> Start Test
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {(["GS1", "CSAT"] as PaperType[]).map((type) => {
+          const info = PAPER_INFO[type];
+          return (
+            <Card key={type} className="border-2 hover:border-primary/50 transition-all cursor-pointer group">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className={cn("p-3 rounded-xl", type === "GS1" ? "bg-blue-500/10" : "bg-purple-500/10")}>
+                    <BookOpen className={cn("w-6 h-6", type === "GS1" ? "text-blue-500" : "text-purple-500")} />
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    {info.questions} Qs • {info.duration} mins
+                  </Badge>
+                </div>
+                <h2 className="text-xl font-bold text-foreground mb-2">{info.title}</h2>
+                <p className="text-sm text-muted-foreground mb-6">{info.desc}</p>
+                <div className="space-y-2 mb-6 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                    <span>+2 for correct, −0.67 for wrong (UPSC marking)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-3.5 h-3.5 text-amber-500" />
+                    <span>AI webcam proctoring enabled</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                    <span>3 violations = auto-submit</span>
+                  </div>
+                  {type === "GS1" && (
+                    <div className="flex items-center gap-2">
+                      <BookOpen className="w-3.5 h-3.5 text-blue-500" />
+                      <span>MCQ + Statement + Assertion-Reason + Match + Chronological</span>
+                    </div>
+                  )}
+                  {type === "CSAT" && (
+                    <div className="flex items-center gap-2">
+                      <BookOpen className="w-3.5 h-3.5 text-purple-500" />
+                      <span>Comprehension + Logical + Maths + Data Interpretation</span>
+                    </div>
+                  )}
+                </div>
+                <Button
+                  onClick={() => generateTest(type)}
+                  className="w-full"
+                  variant={type === "GS1" ? "default" : "outline"}
+                >
+                  Generate New {info.title} →
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
-      <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900">
-        <CardContent className="p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-amber-900 dark:text-amber-200">AI Proctoring Notice</p>
-            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
-              Full AI proctoring with face detection (face-api.js) will be integrated by the developer. 
-              Questions, timer, and scoring are fully functional.
+
+      {/* Past Tests */}
+      {history.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold mb-3">Past Mock Tests</h2>
+          <div className="space-y-2">
+            {history.slice(0, 5).map((t) => (
+              <div key={t.id} className="flex items-center justify-between p-3 rounded-lg border bg-card">
+                <div>
+                  <p className="text-sm font-medium">{t.title}</p>
+                  <p className="text-xs text-muted-foreground">{new Date(t.createdAt).toLocaleDateString("en-IN")}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-primary">{t.score?.toFixed(1)} / {t.totalQuestions * 2}</p>
+                  <p className="text-xs text-muted-foreground">{t.attempted}/{t.totalQuestions} attempted</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // ── GENERATING ─────────────────────────────────────────────────────────
+  if (mode === "generating") return (
+    <div className="flex flex-col items-center justify-center min-h-[500px] gap-6">
+      <Loader2 className="w-16 h-16 text-primary animate-spin" />
+      <div className="text-center">
+        <h2 className="text-2xl font-bold text-foreground">Generating Your Mock Test</h2>
+        <p className="text-muted-foreground mt-2">
+          AI is creating a unique {PAPER_INFO[paperType].title} with {PAPER_INFO[paperType].questions} questions...
+        </p>
+        <p className="text-sm text-muted-foreground mt-1">This may take 10-20 seconds</p>
+      </div>
+      <div className="w-64">
+        <Progress value={undefined} className="h-2 animate-pulse" />
+      </div>
+    </div>
+  );
+
+  // ── SETUP / PRE-EXAM RULES ──────────────────────────────────────────────
+  if (mode === "setup") return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      <Card className="border-2 border-primary/30">
+        <CardHeader className="bg-primary/5 rounded-t-xl">
+          <CardTitle className="text-center text-xl">
+            📋 Exam Instructions — {PAPER_INFO[paperType].title}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-6 space-y-4">
+          <div className="grid grid-cols-3 gap-4 text-center mb-4">
+            <div className="bg-muted rounded-lg p-3">
+              <p className="text-2xl font-bold text-primary">{questions.length}</p>
+              <p className="text-xs text-muted-foreground">Questions</p>
+            </div>
+            <div className="bg-muted rounded-lg p-3">
+              <p className="text-2xl font-bold text-primary">120</p>
+              <p className="text-xs text-muted-foreground">Minutes</p>
+            </div>
+            <div className="bg-muted rounded-lg p-3">
+              <p className="text-2xl font-bold text-primary">{questions.length * 2}</p>
+              <p className="text-xs text-muted-foreground">Max Marks</p>
+            </div>
+          </div>
+
+          <div className="space-y-3 text-sm">
+            {[
+              "Each correct answer carries +2 marks. Each wrong answer carries −0.67 marks (negative marking).",
+              "Questions not attempted carry 0 marks.",
+              "Do NOT switch browser tabs during the exam — it will be flagged as a violation.",
+              "Do NOT exit fullscreen mode during the exam.",
+              "Keep your face visible in the webcam at all times.",
+              "3 violations will result in automatic submission of your test.",
+              "You may flag questions for review and return to them before submitting.",
+              "The timer cannot be paused once started.",
+            ].map((rule, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center shrink-0 mt-0.5 font-bold">
+                  {i + 1}
+                </span>
+                <p className="text-foreground">{rule}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mt-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Camera className="w-4 h-4 text-amber-600" />
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Webcam Required</p>
+            </div>
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              AI proctoring will monitor your face throughout the exam. Allow camera access when prompted.
             </p>
           </div>
+
+          <Button onClick={startExam} className="w-full mt-4" size="lg">
+            <Shield className="w-4 h-4 mr-2" />
+            I Understand — Start Exam
+          </Button>
+          <Button variant="ghost" onClick={() => setMode("home")} className="w-full">
+            Cancel
+          </Button>
         </CardContent>
       </Card>
     </div>
   );
 
-  if (mode === "result") {
-    const grade = score / questions.length >= 0.8 ? "Excellent" : score / questions.length >= 0.6 ? "Good" : score / questions.length >= 0.4 ? "Average" : "Needs Improvement";
-    const gradeColor = score / questions.length >= 0.8 ? "text-green-600" : score / questions.length >= 0.6 ? "text-amber-600" : "text-red-600";
-    return (
-      <div className="max-w-xl mx-auto space-y-6">
-        <div className="text-center py-6">
-          <Trophy className="w-16 h-16 text-amber-500 mx-auto mb-3" />
-          <h1 className="text-2xl font-bold text-foreground">Test Complete!</h1>
-          <p className={cn("text-lg font-semibold mt-1", gradeColor)}>{grade}</p>
-        </div>
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-center mb-6">
-              <p className="text-5xl font-bold text-primary">{score}<span className="text-2xl text-muted-foreground">/{questions.length}</span></p>
-              <p className="text-muted-foreground mt-1">Score</p>
-            </div>
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div className="bg-green-50 dark:bg-green-950 rounded-lg p-3">
-                <p className="text-2xl font-bold text-green-600">{score}</p>
-                <p className="text-xs text-muted-foreground">Correct</p>
-              </div>
-              <div className="bg-red-50 dark:bg-red-950 rounded-lg p-3">
-                <p className="text-2xl font-bold text-red-600">{attempted - score}</p>
-                <p className="text-xs text-muted-foreground">Wrong</p>
-              </div>
-              <div className="bg-muted rounded-lg p-3">
-                <p className="text-2xl font-bold text-muted-foreground">{questions.length - attempted}</p>
-                <p className="text-xs text-muted-foreground">Skipped</p>
-              </div>
-            </div>
-            <div className="mt-4 pt-4 border-t">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Accuracy (attempted)</span>
-                <span className="font-medium">{accuracy}%</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <div className="space-y-2">
-          {questions.map((q, i) => (
-            <div key={i} className="flex items-center gap-3 p-3 rounded-lg border" data-testid={`result-q-${i}`}>
-              {answers[i] === q.correctAnswer ? <CheckCircle className="w-4 h-4 text-green-500 shrink-0" /> : <div className="w-4 h-4 rounded-full border-2 border-red-400 shrink-0" />}
-              <p className="text-sm text-foreground truncate flex-1">{q.question.substring(0, 60)}...</p>
-              <Badge variant="outline" className="text-xs shrink-0">{q.subject}</Badge>
-            </div>
-          ))}
-        </div>
-        <Button onClick={() => setMode("home")} className="w-full" data-testid="button-back-to-tests">
-          <RotateCcw className="w-4 h-4 mr-2" /> Back to Tests
-        </Button>
+  // ── RESULT ──────────────────────────────────────────────────────────────
+  if (mode === "result" && resultData) return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      <div className="text-center py-6">
+        <Trophy className="w-16 h-16 text-amber-500 mx-auto mb-3" />
+        <h1 className="text-2xl font-bold text-foreground">Test Submitted!</h1>
+        <p className="text-muted-foreground mt-1">Estimated Rank: <span className="font-bold text-primary">{resultData.rankEstimate}</span></p>
       </div>
-    );
-  }
-
-  const current = questions[currentIdx];
-  const timerColor = timeLeft < 60 ? "text-red-600" : timeLeft < 180 ? "text-amber-600" : "text-foreground";
-
-  return (
-    <div className="max-w-2xl mx-auto space-y-4">
-      <div className="flex items-center justify-between p-3 bg-card rounded-xl border">
-        <div>
-          <p className="text-xs text-muted-foreground">{selectedTest.title}</p>
-          <p className="text-sm font-medium">Q {currentIdx + 1} / {questions.length}</p>
-        </div>
-        <div className={cn("flex items-center gap-1.5 font-mono text-lg font-bold", timerColor)}>
-          <Clock className="w-4 h-4" />
-          {formatTime(timeLeft)}
-        </div>
-        <Button variant="outline" size="sm" onClick={endTest} data-testid="button-submit-test">Submit</Button>
-      </div>
-
-      <Progress value={(Object.keys(answers).length / questions.length) * 100} className="h-1" />
 
       <Card>
-        <CardContent className="p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Badge variant="outline" className="text-xs">{current.subject}</Badge>
-            <button onClick={() => setFlagged(f => { const nf = new Set(f); nf.has(currentIdx) ? nf.delete(currentIdx) : nf.add(currentIdx); return nf; })}
-              className={cn("text-xs px-2 py-0.5 rounded border transition-colors", flagged.has(currentIdx) ? "bg-amber-100 text-amber-800 border-amber-300" : "text-muted-foreground border-border")}>
-              {flagged.has(currentIdx) ? "⚑ Flagged" : "⚐ Flag"}
-            </button>
+        <CardContent className="p-6 space-y-4">
+          <div className="text-center">
+            <p className="text-5xl font-bold text-primary">{resultData.score}</p>
+            <p className="text-muted-foreground">/ {resultData.maxScore} marks</p>
           </div>
-          <p className="text-base font-medium text-foreground leading-relaxed mb-5">{current.question}</p>
-          <div className="space-y-2.5">
-            {current.options.map((opt, idx) => (
-              <button key={idx} onClick={() => setAnswers(a => ({ ...a, [currentIdx]: idx }))}
-                data-testid={`mock-option-${idx}`}
-                className={cn("w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all",
-                  answers[currentIdx] === idx ? "border-primary bg-primary/10 text-primary" : "border-border hover:border-primary/40"
-                )}>
-                <span className={cn("w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold shrink-0",
-                  answers[currentIdx] === idx ? "border-primary text-primary" : "border-muted-foreground text-muted-foreground")}>
-                  {String.fromCharCode(65 + idx)}
-                </span>
-                <span className="text-sm">{opt}</span>
-              </button>
-            ))}
+
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-green-50 dark:bg-green-950 rounded-lg p-3">
+              <p className="text-xl font-bold text-green-600">{resultData.attempted}</p>
+              <p className="text-xs text-muted-foreground">Attempted</p>
+            </div>
+            <div className="bg-red-50 dark:bg-red-950 rounded-lg p-3">
+              <p className="text-xl font-bold text-red-600">{resultData.skipped}</p>
+              <p className="text-xs text-muted-foreground">Skipped</p>
+            </div>
+            <div className="bg-amber-50 dark:bg-amber-950 rounded-lg p-3">
+              <p className="text-xl font-bold text-amber-600">{resultData.incidents}</p>
+              <p className="text-xs text-muted-foreground">Violations</p>
+            </div>
           </div>
+
+          {resultData.subjectBreakdown.length > 0 && (
+            <div className="space-y-2 pt-2 border-t">
+              <p className="text-sm font-semibold">Subject-wise Performance</p>
+              {resultData.subjectBreakdown.map((s) => (
+                <div key={s.subject}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-foreground">{s.subject}</span>
+                    <span className="text-muted-foreground">{s.correct}/{s.total} ({s.accuracy}%)</span>
+                  </div>
+                  <Progress value={s.accuracy} className="h-1.5" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {resultData.incidents > 0 && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 rounded-lg p-3 text-sm text-red-700 dark:text-red-400">
+              ⚠️ {resultData.incidents} proctoring violation{resultData.incidents > 1 ? "s" : ""} were recorded during this test.
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground text-center">
+            Wrong answers have been automatically added to your Flashcard decks for review.
+          </p>
         </CardContent>
       </Card>
 
-      <div className="flex items-center justify-between">
-        <Button variant="outline" onClick={() => setCurrentIdx(i => Math.max(0, i - 1))} disabled={currentIdx === 0} data-testid="button-prev-q">Previous</Button>
-        <div className="flex gap-1 flex-wrap max-w-xs justify-center">
-          {questions.map((_, i) => (
-            <button key={i} onClick={() => setCurrentIdx(i)}
-              data-testid={`q-nav-${i}`}
-              className={cn("w-7 h-7 rounded text-xs font-medium transition-colors",
-                i === currentIdx ? "bg-primary text-primary-foreground" :
-                answers[i] !== undefined ? "bg-green-500/20 text-green-700 border border-green-300" :
-                "bg-muted text-muted-foreground hover:bg-muted/70"
-              )}>
-              {i + 1}
-            </button>
-          ))}
+      <Button onClick={() => setMode("home")} className="w-full">
+        <RotateCcw className="w-4 h-4 mr-2" /> Back to Mock Tests
+      </Button>
+    </div>
+  );
+
+  // ── RUNNING EXAM ────────────────────────────────────────────────────────
+  const current = questions[currentIdx];
+  if (!current) return null;
+
+  const answeredCount = Object.keys(answers).filter((k) => answers[k] !== null && answers[k] !== undefined).length;
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-4 relative">
+
+      {/* Warning overlay */}
+      {showWarning && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce">
+          <AlertTriangle className="w-5 h-5" />
+          <span className="font-semibold">{showWarning}</span>
+          <span className="bg-red-800 px-2 py-0.5 rounded text-xs">
+            {warnings}/3 warnings
+          </span>
         </div>
-        {currentIdx + 1 < questions.length
-          ? <Button onClick={() => setCurrentIdx(i => i + 1)} data-testid="button-next-q">Next</Button>
-          : <Button onClick={endTest} data-testid="button-finish-test">Finish</Button>
-        }
+      )}
+
+      {/* Top bar */}
+      <div className="flex items-center justify-between p-3 bg-card rounded-xl border sticky top-0 z-40">
+        <div>
+          <p className="text-xs text-muted-foreground font-medium">
+            {PAPER_INFO[paperType].title}
+          </p>
+          <p className="text-sm font-bold text-foreground">
+            Q {currentIdx + 1} / {questions.length}
+          </p>
+        </div>
+
+        <div className={cn("flex items-center gap-2 font-mono text-xl font-bold", timerColor)}>
+          <Clock className="w-5 h-5" />
+          {formatTime(timeLeft)}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Webcam feed */}
+          <div className="relative w-16 h-12 rounded-lg overflow-hidden bg-slate-900 border border-slate-700">
+            {webcamActive ? (
+              <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+            ) : (
+              <div className="flex items-center justify-center w-full h-full">
+                <CameraOff className="w-4 h-4 text-slate-500" />
+              </div>
+            )}
+          </div>
+
+          {warnings > 0 && (
+            <div className="flex items-center gap-1 bg-red-100 dark:bg-red-950 px-2 py-1 rounded-lg">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+              <span className="text-xs font-bold text-red-600">{warnings}/3</span>
+            </div>
+          )}
+
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => { if (confirm("Submit test now?")) handleSubmit(); }}
+            disabled={submitting}
+          >
+            {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Submit"}
+          </Button>
+        </div>
+      </div>
+
+      <Progress value={(answeredCount / questions.length) * 100} className="h-1" />
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        {/* Question */}
+        <div className="lg:col-span-3 space-y-4">
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Badge variant="outline" className="text-xs">{current.subject}</Badge>
+                <Badge variant="outline" className={cn("text-xs capitalize",
+                  current.difficulty === "hard" ? "border-red-300 text-red-600" :
+                  current.difficulty === "medium" ? "border-amber-300 text-amber-600" :
+                  "border-green-300 text-green-600"
+                )}>
+                  {current.difficulty}
+                </Badge>
+                <Badge variant="outline" className="text-xs capitalize">{current.questionType}</Badge>
+                <button
+                  onClick={() => {
+                    setFlagged((f) => {
+                      const nf = new Set(f);
+                      nf.has(current.id) ? nf.delete(current.id) : nf.add(current.id);
+                      return nf;
+                    });
+                  }}
+                  className={cn(
+                    "ml-auto text-xs px-2 py-0.5 rounded border transition-colors flex items-center gap-1",
+                    flagged.has(current.id)
+                      ? "bg-amber-100 text-amber-700 border-amber-300"
+                      : "text-muted-foreground border-border"
+                  )}
+                >
+                  <Flag className="w-3 h-3" />
+                  {flagged.has(current.id) ? "Flagged" : "Flag"}
+                </button>
+              </div>
+
+              <p className="text-base font-medium text-foreground leading-relaxed mb-6 whitespace-pre-wrap">
+                {current.question}
+              </p>
+
+              <div className="space-y-2.5">
+                {current.options.map((opt, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setAnswers((a) => ({ ...a, [current.id]: idx }))}
+                    className={cn(
+                      "w-full flex items-center gap-3 p-3.5 rounded-lg border-2 text-left transition-all",
+                      answers[current.id] === idx
+                        ? "border-primary bg-primary/10"
+                        : "border-border hover:border-primary/40 hover:bg-primary/5"
+                    )}
+                  >
+                    <span className={cn(
+                      "w-7 h-7 rounded-full border-2 flex items-center justify-center text-sm font-bold shrink-0",
+                      answers[current.id] === idx
+                        ? "border-primary text-primary"
+                        : "border-muted-foreground text-muted-foreground"
+                    )}>
+                      {String.fromCharCode(65 + idx)}
+                    </span>
+                    <span className="text-sm text-foreground">{opt}</span>
+                  </button>
+                ))}
+              </div>
+
+              {answers[current.id] !== undefined && answers[current.id] !== null && (
+                <button
+                  onClick={() => setAnswers((a) => { const n = { ...a }; delete n[current.id]; return n; })}
+                  className="mt-3 text-xs text-muted-foreground hover:text-red-500 transition-colors"
+                >
+                  Clear answer
+                </button>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="flex justify-between">
+            <Button variant="outline" onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))} disabled={currentIdx === 0}>
+              <ChevronLeft className="w-4 h-4 mr-1" /> Previous
+            </Button>
+            {currentIdx + 1 < questions.length ? (
+              <Button onClick={() => setCurrentIdx((i) => i + 1)}>
+                Next <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            ) : (
+              <Button onClick={() => handleSubmit()} disabled={submitting}>
+                {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Finish & Submit
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Question palette */}
+        <div className="lg:col-span-1">
+          <Card className="sticky top-20">
+            <CardHeader className="pb-2 pt-4 px-4">
+              <CardTitle className="text-xs text-muted-foreground">Question Palette</CardTitle>
+              <div className="flex gap-2 flex-wrap text-xs mt-1">
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-green-500 inline-block" /> Answered</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-amber-400 inline-block" /> Flagged</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-muted inline-block border" /> Not visited</span>
+              </div>
+            </CardHeader>
+            <CardContent className="px-3 pb-4">
+              <div className="grid grid-cols-5 gap-1">
+                {questions.map((q, i) => (
+                  <button
+                    key={q.id}
+                    onClick={() => setCurrentIdx(i)}
+                    className={cn(
+                      "w-8 h-8 rounded text-xs font-bold transition-all",
+                      i === currentIdx ? "ring-2 ring-primary ring-offset-1" : "",
+                      flagged.has(q.id)
+                        ? "bg-amber-400 text-amber-900"
+                        : answers[q.id] !== undefined && answers[q.id] !== null
+                        ? "bg-green-500 text-white"
+                        : "bg-muted text-muted-foreground hover:bg-muted/70"
+                    )}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 pt-3 border-t space-y-1 text-xs text-muted-foreground">
+                <div className="flex justify-between">
+                  <span>Answered:</span>
+                  <span className="font-bold text-green-600">{answeredCount}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Not answered:</span>
+                  <span className="font-bold text-red-500">{questions.length - answeredCount}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Flagged:</span>
+                  <span className="font-bold text-amber-500">{flagged.size}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

@@ -32,6 +32,7 @@ model Question {
   id            String   @id @default(uuid())
   subject       String
   difficulty    String
+  questionType  String   @default("mcq")
   question      String
   options       Json
   correctAnswer Int
@@ -40,6 +41,7 @@ model Question {
   createdAt     DateTime @default(now())
   attempts      UserQuestionAttempt[]
   flashcards    Flashcard[]
+  mockAnswers   MockTestAnswer[]
 }
 
 model UserQuestionAttempt {
@@ -86,4 +88,40 @@ model Flashcard {
   lastResult       String?
   sourceQuestionId String?
   sourceQuestion   Question?     @relation(fields: [sourceQuestionId], references: [id])
+}
+
+model MockTest {
+  id             String           @id @default(uuid())
+  clerkUserId    String
+  paperType      String           // "GS1" | "CSAT"
+  title          String
+  score          Float            @default(0)
+  totalQuestions Int
+  attempted      Int              @default(0)
+  timeTaken      Int              @default(0)  // seconds
+  incidents      Json             @default("[]")
+  completed      Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  answers        MockTestAnswer[]
+}
+
+model MockTestAnswer {
+  id          String    @id @default(uuid())
+  mockTestId  String
+  mockTest    MockTest  @relation(fields: [mockTestId], references: [id])
+  questionId  String
+  question    Question  @relation(fields: [questionId], references: [id])
+  selectedAns Int?
+  isCorrect   Boolean   @default(false)
+  timeTaken   Int       @default(0)
+  flagged     Boolean   @default(false)
+}
+
+model MockTestQuestionUsed {
+  id          String @id @default(uuid())
+  clerkUserId String
+  questionId  String
+  mockTestId  String
+  usedAt      DateTime @default(now())
+  @@unique([clerkUserId, questionId])
 }
