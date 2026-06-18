@@ -1,8 +1,10 @@
+import { useStudyTimer } from "@/hooks/useStudyTimer";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useUser, SignIn } from "@clerk/react";
+
 
 import Layout from "@/components/layout/Layout";
 import Dashboard from "@/pages/Dashboard";
@@ -41,6 +43,8 @@ function Router() {
 
 function AppContent() {
   const { isSignedIn, isLoaded } = useUser();
+  const { user } = useUser();
+useStudyTimer(isSignedIn ? user?.id : undefined);
 
   // 1. Wait for Clerk to load up state
   if (!isLoaded) {

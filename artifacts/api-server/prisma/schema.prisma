@@ -15,6 +15,7 @@ model UserProgress {
   studyHours         Int      @default(0)
   currentStreak      Int      @default(0)
   longestStreak      Int      @default(0)
+  lastStudiedDate    String?
   updatedAt          DateTime @updatedAt
 }
 
@@ -35,6 +36,7 @@ model Question {
   options       Json
   correctAnswer Int
   explanation   String
+  isAIGenerated Boolean  @default(false)
   createdAt     DateTime @default(now())
   attempts      UserQuestionAttempt[]
 }
@@ -48,4 +50,16 @@ model UserQuestionAttempt {
   selectedAns Int
   attemptedAt DateTime @default(now())
   @@unique([clerkUserId, questionId])
+}
+
+model DailyStudyLog {
+  id                 String   @id @default(uuid())
+  clerkUserId        String
+  date               String
+  questionsAttempted Int      @default(0)
+  flashcardsReviewed Int      @default(0)
+  currentAffairsRead Boolean  @default(false)
+  mockTestCompleted  Boolean  @default(false)
+  studyMinutes       Int      @default(0)
+  @@unique([clerkUserId, date])
 }
