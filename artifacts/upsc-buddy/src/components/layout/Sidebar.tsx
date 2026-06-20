@@ -15,7 +15,6 @@ const navItems = [
   { path: "/flashcards", label: "Flashcards", icon: Layers },
   { path: "/notes", label: "Notes", icon: FileText },
   { path: "/current-affairs", label: "Current Affairs", icon: Newspaper },
-  { path: "/progress", label: "Progress", icon: TrendingUp },
   { path: "/calendar", label: "Study Calendar", icon: Calendar },
   { path: "/about", label: "About", icon: Info },
 ];

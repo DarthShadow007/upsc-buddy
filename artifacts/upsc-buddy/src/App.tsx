@@ -14,7 +14,6 @@ import Vocabulary from "@/pages/Vocabulary";
 import Flashcards from "@/pages/Flashcards";
 import Notes from "@/pages/Notes";
 import CurrentAffairs from "@/pages/CurrentAffairs";
-import ProgressPage from "@/pages/Progress";
 import StudyCalendar from "@/pages/StudyCalendar";
 import About from "@/pages/About";
 import NotFound from "@/pages/not-found";
@@ -31,8 +30,7 @@ function Router() {
         <Route path="/vocabulary" component={Vocabulary} />
         <Route path="/flashcards" component={Flashcards} />
         <Route path="/notes" component={Notes} />
-        <Route path="/current-affairs" component={CurrentAffairs} />
-        <Route path="/progress" component={ProgressPage} />
+        <Route path="/current-affairs" component={CurrentAffairs} /> 
         <Route path="/calendar" component={StudyCalendar} />
         <Route path="/about" component={About} />
         <Route component={NotFound} />

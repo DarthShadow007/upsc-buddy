@@ -1,22 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Calendar, ChevronLeft, ChevronRight, Plus, Clock, BookOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Event = { id: number; date: string; title: string; type: "study" | "test" | "revision"; duration: number };
-
-const initialEvents: Event[] = [
-  { id: 1, date: "2024-01-15", title: "Polity - Constitutional Amendments", type: "study", duration: 2 },
-  { id: 2, date: "2024-01-15", title: "Practice MCQs - History", type: "study", duration: 1 },
-  { id: 3, date: "2024-01-17", title: "Mock Test #3", type: "test", duration: 2 },
-  { id: 4, date: "2024-01-18", title: "Geography - Rivers Revision", type: "revision", duration: 1.5 },
-  { id: 5, date: "2024-01-20", title: "Economy - Budget Analysis", type: "study", duration: 3 },
-  { id: 6, date: "2024-01-22", title: "Full Mock Test #4", type: "test", duration: 2 },
-  { id: 7, date: "2024-01-25", title: "Current Affairs Weekly Review", type: "revision", duration: 1 },
-];
 
 const typeColors = {
   study: "bg-primary/20 text-primary border-primary/30",
@@ -28,13 +17,27 @@ const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export default function StudyCalendar() {
+  const secureUserId = "local_student_123";
+
   const today = new Date();
-  const [currentDate, setCurrentDate] = useState(new Date(2024, 0, 1));
-  const [events, setEvents] = useState<Event[]>(initialEvents);
+  const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [events, setEvents] = useState<Event[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newType, setNewType] = useState<"study" | "test" | "revision">("study");
+
+  useEffect(() => {
+    const savedEvents = localStorage.getItem(`upsc-events-${secureUserId}`);
+    if (savedEvents) {
+      setEvents(JSON.parse(savedEvents));
+    }
+  }, []);
+
+  const persistEvents = (newEvents: Event[]) => {
+    setEvents(newEvents);
+    localStorage.setItem(`upsc-events-${secureUserId}`, JSON.stringify(newEvents));
+  };
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -43,29 +46,30 @@ export default function StudyCalendar() {
   const daysInPrevMonth = new Date(year, month, 0).getDate();
 
   const cells: { date: string | null; day: number; isCurrentMonth: boolean }[] = [];
-  for (let i = firstDay - 1; i >= 0; i--) {
-    cells.push({ date: null, day: daysInPrevMonth - i, isCurrentMonth: false });
-  }
+  
+  for (let i = firstDay - 1; i >= 0; i--) cells.push({ date: null, day: daysInPrevMonth - i, isCurrentMonth: false });
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     cells.push({ date: dateStr, day: d, isCurrentMonth: true });
   }
+  
   const remaining = 42 - cells.length;
-  for (let d = 1; d <= remaining; d++) {
-    cells.push({ date: null, day: d, isCurrentMonth: false });
-  }
+  for (let d = 1; d <= remaining; d++) cells.push({ date: null, day: d, isCurrentMonth: false });
 
   const getEventsForDate = (date: string) => events.filter(e => e.date === date);
   const selectedEvents = selectedDate ? getEventsForDate(selectedDate) : [];
 
   const addEvent = () => {
     if (!newTitle.trim() || !selectedDate) return;
-    setEvents(es => [...es, { id: Date.now(), date: selectedDate, title: newTitle, type: newType, duration: 1 }]);
+    const newEvents = [...events, { id: Date.now(), date: selectedDate, title: newTitle, type: newType, duration: 1 }];
+    persistEvents(newEvents);
     setNewTitle("");
     setAdding(false);
   };
 
-  const deleteEvent = (id: number) => setEvents(es => es.filter(e => e.id !== id));
+  const deleteEvent = (id: number) => {
+    persistEvents(events.filter(e => e.id !== id));
+  };
 
   const totalHours = events.reduce((acc, e) => acc + e.duration, 0);
   const studyDays = new Set(events.map(e => e.date)).size;
@@ -151,7 +155,7 @@ export default function StudyCalendar() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {adding && (
-                  <div className="space-y-2 p-2 bg-muted rounded-lg mb-2">
+                  <div className="space-y-2 p-2 bg-slate-900 rounded-lg mb-2 border border-slate-700">
                     <Input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Event title..." className="h-8 text-sm" data-testid="input-event-title" />
                     <div className="flex gap-1">
                       {(["study", "test", "revision"] as const).map(t => (
@@ -161,7 +165,7 @@ export default function StudyCalendar() {
                         </button>
                       ))}
                     </div>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 pt-2">
                       <Button size="sm" onClick={addEvent} className="flex-1 h-7 text-xs" data-testid="button-save-event">Save</Button>
                       <Button size="sm" variant="outline" onClick={() => setAdding(false)} className="h-7 text-xs">Cancel</Button>
                     </div>
