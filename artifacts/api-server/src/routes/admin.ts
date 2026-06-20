@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
-import { generateQuestionsForSubject } from "../lib/gemini";
+import { generateMockTestChunk } from "../lib/gemini"; // 👈 Updated Import
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -8,19 +8,21 @@ const SUBJECTS = ["Polity", "History", "Geography", "Economy", "Science", "Curre
 
 router.post("/generate-questions", async (req, res) => {
   try {
-    // We now extract both subject and difficulty from the frontend request
     const { subject, difficulty } = req.body; 
     const subjectsToProcess = subject ? [subject] : SUBJECTS;
     
-    // If generating for one subject manually, make 10 questions. If doing all weekly, make 6 each.
-    const questionsPerSubject = subject ? 10 : 6; 
+    // 👈 Always target exactly 10 questions to fill the practice bank
+    const questionsPerSubject = 10; 
     let totalAdded = 0;
     
     for (const sub of subjectsToProcess) {
       console.log(`Asking Gemini for new ${sub} questions... (Difficulty: ${difficulty || 'mixed'})`);
       
-      // Pass the difficulty to the Gemini service
-      const newQuestions = await generateQuestionsForSubject(sub, questionsPerSubject, difficulty); 
+      const targetEngine = sub === "Current Affairs" ? "ca" : "practice";
+      const isCSAT = sub === "CSAT";
+      
+      // 👈 Use chunker to guarantee diverse formats and safely bypass the 5-cap
+      const newQuestions = await generateMockTestChunk(sub, questionsPerSubject, isCSAT, targetEngine); 
       
       for (const q of newQuestions) {
         const exists = await prisma.question.findFirst({ where: { question: q.question } });
@@ -28,8 +30,7 @@ router.post("/generate-questions", async (req, res) => {
           await prisma.question.create({
             data: {
               subject: q.subject, 
-              // Force lowercase so it perfectly matches your frontend filters (easy, medium, hard)
-              difficulty: q.difficulty.toLowerCase(), 
+              difficulty: q.difficulty?.toLowerCase() || "medium", 
               question: q.question,
               options: q.options, 
               correctAnswer: q.correctAnswer, 
@@ -40,8 +41,9 @@ router.post("/generate-questions", async (req, res) => {
           totalAdded++;
         }
       }
-      // 4-second delay to respect Gemini rate limits
-      await new Promise((resolve) => setTimeout(resolve, 4000));
+      
+      // 👈 8-second delay guarantees we stay below Gemini's 15 Requests Per Minute limit across all subjects
+      await new Promise((resolve) => setTimeout(resolve, 8000));
     }
     
     res.json({ success: true, message: `Added ${totalAdded} new AI questions.`, totalAdded });

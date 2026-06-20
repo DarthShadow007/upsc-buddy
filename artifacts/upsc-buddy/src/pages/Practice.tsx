@@ -19,7 +19,7 @@ interface Question {
   subject: string;
   difficulty: "easy" | "medium" | "hard";
   question: string;
-  options: any; // Changed from string[] to any so we can safely parse it
+  options: any; 
   correctAnswer: any;
   explanation: string;
 }
@@ -67,7 +67,9 @@ export default function Practice() {
       const params = new URLSearchParams({ limit: "10" });
       if (filterSubject !== "all") params.append("subject", filterSubject);
       if (filterDifficulty !== "all") params.append("difficulty", filterDifficulty);
-      const res = await fetch(`/api/questions/practice/${user?.id}?${params}`);
+      
+      // FIX: Explicitly target the backend URL to bypass Vite proxy drops
+      const res = await fetch(`http://localhost:5000/api/questions/practice/${user?.id}?${params}`);
       if (!res.ok) throw new Error("Failed to fetch questions");
       return res.json();
     },
@@ -82,7 +84,8 @@ export default function Practice() {
       isCorrect: boolean;
       subject: string;
     }) => {
-      const res = await fetch("/api/questions/attempt", {
+      // FIX: Explicitly target the backend URL
+      const res = await fetch("http://localhost:5000/api/questions/attempt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clerkId: user?.id, ...payload }),

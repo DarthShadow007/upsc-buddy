@@ -1,8 +1,25 @@
 import { GoogleGenerativeAI, SchemaType, type ResponseSchema } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const MODEL_NAME = "gemini-3.1-flash-lite";
 
+// ── DELAYED ENGINE INITIALIZATION (Fixes the 401 bug) ─────────────────────
+// This ensures keys are only read AFTER the .env file is fully loaded into memory.
+function getActiveModel(engine: "mock" | "practice" | "ca") {
+  let apiKey = "";
+  
+  if (engine === "mock") apiKey = process.env.GEMINI_API_KEY || "";
+  else if (engine === "practice") apiKey = process.env.PRACTICE_KEY || "";
+  else if (engine === "ca") apiKey = process.env.CA_KEY || "";
+
+  if (!apiKey) {
+    console.error(`🚨 FATAL: Missing API key for the '${engine}' engine! Check your .env file.`);
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  return genAI.getGenerativeModel({ model: MODEL_NAME });
+}
+
+// ── EXACT CALIBRATION PROMPTS (UNTOUCHED) ─────────────────────────────────
 const GS_QUESTION_TYPE_PROMPTS: Record<string, string> = {
 
   direct_mcq: `Generate a DIRECT FACT-BASED MCQ in the style of UPSC Prelims.
@@ -128,11 +145,11 @@ export async function generateQuestionsForSubject(
   subject: string,
   count: number,
   specificDifficulty?: string,
-  questionTypes?: string[]
+  questionTypes?: string[],
+  engine: "mock" | "practice" | "ca" = "mock"
 ): Promise<any[]> {
 
   const isCSAT = subject === "CSAT";
-
   const safeCount = isCSAT ? Math.min(count, 3) : Math.min(count, 5);
 
   const typePool = isCSAT
@@ -230,7 +247,9 @@ STRICT RULES:
 7. Return valid JSON array only — no markdown, no extra text`;
 
   try {
-    const result = await model.generateContent({
+    const activeModel = getActiveModel(engine);
+
+    const result = await activeModel.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         responseMimeType: "application/json",
@@ -270,7 +289,8 @@ STRICT RULES:
 export async function generateMockTestChunk(
   subject: string,
   count: number,
-  isCSAT: boolean
+  isCSAT: boolean,
+  engine: "mock" | "practice" | "ca" = "mock" // 👈 Updated to accept engine routing
 ): Promise<any[]> {
   const results: any[] = [];
   const chunkSize = isCSAT ? 3 : 5;
@@ -303,7 +323,7 @@ export async function generateMockTestChunk(
         const types = [typePool[typeIndex]];
         const thisCount = Math.min(chunkSize, count - (i + j) * chunkSize);
         return thisCount > 0
-          ? generateQuestionsForSubject(subject, thisCount, undefined, types)
+          ? generateQuestionsForSubject(subject, thisCount, undefined, types, engine) // 👈 Passes engine to core generator
           : Promise.resolve([]);
       }
     );

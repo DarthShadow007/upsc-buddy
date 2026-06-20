@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { generateQuestionsForSubject } from "../lib/gemini";
 
 const router = Router();
 
@@ -7,6 +8,7 @@ const router = Router();
 router.get("/practice/:clerkId", async (req, res) => {
   const { clerkId } = req.params;
   const { subject, difficulty, limit = "10" } = req.query;
+  const parsedLimit = parseInt(limit as string);
 
   try {
     const attempted = await prisma.userQuestionAttempt.findMany({
@@ -23,12 +25,73 @@ router.get("/practice/:clerkId", async (req, res) => {
 
     let questions = await prisma.question.findMany({
       where,
-      take: parseInt(limit as string),
+      take: parsedLimit,
       orderBy: { createdAt: "asc" },
     });
 
     let reset = false;
 
+    // ── NEW: DYNAMIC PRACTICE GENERATION USING THE ISOLATED PRACTICE KEY ──
+    // If the database runs out of unseen questions, generate more on the fly!
+    if (questions.length < parsedLimit) {
+      const needed = parsedLimit - questions.length;
+      
+      // If user selected "all subjects", pick a random UPSC subject to generate
+      const GS_SUBJECTS = ["History", "Geography", "Polity", "Economy", "Environment", "Science & Tech", "CSAT"];
+      const targetSubject = (subject && subject !== "all") 
+        ? subject as string 
+        : GS_SUBJECTS[Math.floor(Math.random() * GS_SUBJECTS.length)]; 
+      
+      // 🚨 NOTE the "practice" flag — this forces it to use PRACTICE_KEY
+      const newRawQs = await generateQuestionsForSubject(
+        targetSubject, 
+        needed, 
+        difficulty && difficulty !== "all" ? difficulty as string : undefined,
+        undefined, 
+        "practice" 
+      );
+
+      for (const q of newRawQs) {
+        if (!q.question || !q.options) continue;
+
+        let optionsArray: string[];
+        if (Array.isArray(q.options)) {
+          optionsArray = q.options;
+        } else if (typeof q.options === "object") {
+          optionsArray = [
+            q.options.A || q.options["0"] || "",
+            q.options.B || q.options["1"] || "",
+            q.options.C || q.options["2"] || "",
+            q.options.D || q.options["3"] || "",
+          ];
+        } else {
+          continue;
+        }
+
+        const correctIndex = typeof q.correctAnswer === "number"
+          ? q.correctAnswer > 3 ? q.correctAnswer - 1 : q.correctAnswer
+          : 0;
+
+        try {
+          const saved = await prisma.question.create({
+            data: {
+              subject: targetSubject,
+              difficulty: q.difficulty || "medium",
+              questionType: q.questionType || "mcq",
+              question: q.question,
+              options: optionsArray,
+              correctAnswer: Math.min(correctIndex, 3),
+              explanation: q.explanation || "Refer to standard UPSC material.",
+              isAIGenerated: true,
+            },
+          });
+          questions.push(saved);
+        } catch {}
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
+    // Fallback reset if absolute failure
     if (questions.length === 0) {
       reset = true;
       const resetWhere: any = {};
@@ -36,7 +99,7 @@ router.get("/practice/:clerkId", async (req, res) => {
       if (difficulty && difficulty !== "all") resetWhere.difficulty = difficulty;
       questions = await prisma.question.findMany({
         where: resetWhere,
-        take: parseInt(limit as string),
+        take: parsedLimit,
         orderBy: { createdAt: "asc" },
       });
     }
@@ -49,6 +112,7 @@ router.get("/practice/:clerkId", async (req, res) => {
 });
 
 // POST save a user's answer + auto-create flashcard on wrong answer
+// (UNTOUCHED PER YOUR INSTRUCTIONS)
 router.post("/attempt", async (req, res) => {
   const { clerkId, questionId, selectedAns, isCorrect, subject } = req.body;
 

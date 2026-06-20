@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { Button } from "./ui/button"; // Assuming you have shadcn UI button
+import { useState, useEffect } from "react";
+import { Button } from "./ui/button"; 
+import { Progress } from "@/components/ui/progress"; // 👈 Imported Progress Component
 import { RefreshCw, Sparkles } from "lucide-react";
-// If you don't have a toast library installed yet, you can replace this with a standard alert() for now
 import { useToast } from "@/hooks/use-toast"; 
 
 export default function AIGeneratorButton({ 
@@ -12,24 +12,40 @@ export default function AIGeneratorButton({
   specificDifficulty?: string
 }) {
   const [isGenerating, setIsGenerating] = useState(false);
+  const [progress, setProgress] = useState(0); // 👈 Progress State
   const { toast } = useToast();
+
+  // 👈 Effect to smoothly animate the progress bar while generating
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isGenerating) {
+      setProgress(0);
+      interval = setInterval(() => {
+        // Creeps up towards 95% while waiting for the API to respond
+        setProgress((prev) => (prev >= 95 ? 95 : prev + 1.5));
+      }, 1000);
+    } else {
+      // Snaps to 100% then resets when generation completes or fails
+      setProgress(100);
+      const timeout = setTimeout(() => setProgress(0), 1000);
+      return () => clearTimeout(timeout);
+    }
+    return () => clearInterval(interval);
+  }, [isGenerating]);
 
   const handleGenerate = async () => {
     setIsGenerating(true);
     
-    // Build a dynamic description for the notification
     let desc = `Generating new UPSC questions`;
     if (specificSubject) desc += ` for ${specificSubject}`;
     if (specificDifficulty) desc += ` at ${specificDifficulty} level`;
     
-    // Show an initial notification so they know it started
     toast({
       title: "AI is thinking... 🧠",
-      description: `${desc}. This takes about 15-30 seconds.`,
+      description: `${desc}. This will take a moment.`,
     });
 
     try {
-      // Build the payload with both subject and difficulty if they exist
       const payload: any = {};
       if (specificSubject) payload.subject = specificSubject;
       if (specificDifficulty) payload.difficulty = specificDifficulty;
@@ -62,22 +78,29 @@ export default function AIGeneratorButton({
   };
 
   return (
-    <Button 
-      onClick={handleGenerate} 
-      disabled={isGenerating}
-      className="bg-indigo-600 hover:bg-indigo-700 text-white"
-    >
-      {isGenerating ? (
-        <>
-          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-          Generating...
-        </>
-      ) : (
-        <>
-          <Sparkles className="mr-2 h-4 w-4" />
-          {specificSubject ? `Generate ${specificDifficulty ? specificDifficulty + ' ' : ''}${specificSubject} Questions` : "Generate Fresh Questions Bank"}
-        </>
+    <div className="w-full space-y-3">
+      <Button 
+        onClick={handleGenerate} 
+        disabled={isGenerating}
+        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+      >
+        {isGenerating ? (
+          <>
+            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+            Generating...
+          </>
+        ) : (
+          <>
+            <Sparkles className="mr-2 h-4 w-4" />
+            {specificSubject ? `Generate ${specificDifficulty ? specificDifficulty + ' ' : ''}${specificSubject} Questions` : "Generate Fresh Questions Bank"}
+          </>
+        )}
+      </Button>
+
+      {/* 👈 Render Progress Bar when active or finishing */}
+      {(isGenerating || progress > 0) && (
+        <Progress value={progress} className="h-2 w-full transition-all duration-500" />
       )}
-    </Button>
+    </div>
   );
 }
