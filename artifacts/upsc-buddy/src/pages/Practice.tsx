@@ -69,7 +69,7 @@ export default function Practice() {
       if (filterDifficulty !== "all") params.append("difficulty", filterDifficulty);
       
       // FIX: Explicitly target the backend URL to bypass Vite proxy drops
-      const res = await fetch(`http://localhost:5000/api/questions/practice/${user?.id}?${params}`);
+      const res = await fetch(`https://upsc-buddy-1.onrender.com/api/questions/practice/${user?.id}?${params}`);
       if (!res.ok) throw new Error("Failed to fetch questions");
       return res.json();
     },
@@ -85,7 +85,7 @@ export default function Practice() {
       subject: string;
     }) => {
       // FIX: Explicitly target the backend URL
-      const res = await fetch("http://localhost:5000/api/questions/attempt", {
+      const res = await fetch("https://upsc-buddy-1.onrender.com/api/questions/attempt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clerkId: user?.id, ...payload }),

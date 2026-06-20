@@ -41,14 +41,14 @@ export default function Vocabulary() {
 
   const handleSearch = () => handleAction(async () => {
     if (!search) return;
-    const res = await fetch(`http://localhost:5000/api/vocab/search-word`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ word: search }) });
+    const res = await fetch(`https://upsc-buddy-1.onrender.com/api/vocab/search-word`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ word: search }) });
     const data = await res.json();
     saveWords([data, ...words]);
     setSearch("");
   });
 
   const generateBatch = () => handleAction(async () => {
-    const res = await fetch(`http://localhost:5000/api/vocab/generate-batch`, { method: "POST" });
+    const res = await fetch(`https://upsc-buddy-1.onrender.com/api/vocab/generate-batch`, { method: "POST" });
     const data = await res.json();
     saveWords([...data, ...words]);
   });
@@ -58,7 +58,7 @@ export default function Vocabulary() {
     const availableWords = words.filter(w => !hiddenIds.includes(w.id) && !quizzedWords.includes(w.word)).slice(0, 5);
     if (availableWords.length === 0) return alert("Generate more words first! No un-quizzed words left.");
     
-    const res = await fetch(`http://localhost:5000/api/vocab/generate-mocktest`, { 
+    const res = await fetch(`https://upsc-buddy-1.onrender.com/api/vocab/generate-mocktest`, { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ words: availableWords.map(w => w.word) }) 
     });

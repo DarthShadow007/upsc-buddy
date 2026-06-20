@@ -21,7 +21,7 @@ export default function CurrentAffairs() {
     setLoading(true);
     setProgress(30);
     try {
-      const res = await fetch(`http://localhost:5000/api/ca/fetch-news?topic=${encodeURIComponent(selection)}`, { method: "POST" });
+      const res = await fetch(`https://upsc-buddy-1.onrender.com/api/ca/fetch-news?topic=${encodeURIComponent(selection)}`, { method: "POST" });
       setProgress(70);
       const data = await res.json();
       setLiveAffairs(data.articles || []);
