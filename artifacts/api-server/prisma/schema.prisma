@@ -106,22 +106,54 @@ model MockTest {
 }
 
 model MockTestAnswer {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   mockTestId  String
-  mockTest    MockTest  @relation(fields: [mockTestId], references: [id])
+  mockTest    MockTest @relation(fields: [mockTestId], references: [id])
   questionId  String
-  question    Question  @relation(fields: [questionId], references: [id])
+  question    Question @relation(fields: [questionId], references: [id])
   selectedAns Int?
-  isCorrect   Boolean   @default(false)
-  timeTaken   Int       @default(0)
-  flagged     Boolean   @default(false)
+  isCorrect   Boolean  @default(false)
+  timeTaken   Int      @default(0)
+  flagged     Boolean  @default(false)
 }
 
 model MockTestQuestionUsed {
-  id          String @id @default(uuid())
+  id          String   @id @default(uuid())
   clerkUserId String
   questionId  String
   mockTestId  String
   usedAt      DateTime @default(now())
   @@unique([clerkUserId, questionId])
+}
+
+// ==========================================
+// NEW: CURRENT AFFAIRS & PIB INTEGRATION
+// ==========================================
+
+model CurrentAffairArticle {
+  id          String   @id @default(uuid())
+  title       String
+  ministry    String   @default("General")
+  date        String   
+  content     String   // Raw text extracted from PIB
+  summary     String   // Gemini AI generated summary
+  imageUrl    String?  // Temporary PIB hotlink
+  sourceUrl   String?  // Link back to the official release
+  tags        String[] // Array of strings for topics (e.g., ["Economy", "Odisha"])
+  createdAt   DateTime @default(now())
+
+  // Relation to track which users have read/starred this article
+  userStates  UserCurrentAffairState[]
+}
+
+model UserCurrentAffairState {
+  id          String   @id @default(uuid())
+  clerkUserId String
+  articleId   String
+  article     CurrentAffairArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  isRead      Boolean  @default(false)
+  isImportant Boolean  @default(false)
+
+  // Ensures a user can only have one tracking state per article
+  @@unique([clerkUserId, articleId])
 }
