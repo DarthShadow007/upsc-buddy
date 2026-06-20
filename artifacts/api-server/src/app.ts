@@ -26,8 +26,8 @@ app.use(
   })
 );
 app.use(cors({
-  origin: "http://localhost:5173",
-  credentials: true,
+  origin: ['http://localhost:5173', 'https://upsc-buddy-oo7b.vercel.app'],
+  credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
