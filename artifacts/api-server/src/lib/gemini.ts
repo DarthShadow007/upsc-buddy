@@ -3,7 +3,6 @@ import { GoogleGenerativeAI, SchemaType, type ResponseSchema } from "@google/gen
 const MODEL_NAME = "gemini-3.1-flash-lite";
 
 // ── DELAYED ENGINE INITIALIZATION (Fixes the 401 bug) ─────────────────────
-// This ensures keys are only read AFTER the .env file is fully loaded into memory.
 function getActiveModel(engine: "mock" | "practice" | "ca") {
   let apiKey = "";
   
@@ -290,7 +289,7 @@ export async function generateMockTestChunk(
   subject: string,
   count: number,
   isCSAT: boolean,
-  engine: "mock" | "practice" | "ca" = "mock" // 👈 Updated to accept engine routing
+  engine: "mock" | "practice" | "ca" = "mock"
 ): Promise<any[]> {
   const results: any[] = [];
   const chunkSize = isCSAT ? 3 : 5;
@@ -314,7 +313,10 @@ export async function generateMockTestChunk(
 
   const typePool = isCSAT ? csatTypes : gsTypes;
 
-  const batchSize = 3;
+  // ── ONLY CHANGE: batchSize 3→6, delay 1000ms→200ms ─────────────────────
+  // gemini-3.1-flash-lite allows 15 RPM (was 10), so we can safely
+  // run 6 parallel calls and cut the wait between batches to 200ms.
+  const batchSize = 6;
   for (let i = 0; i < chunks; i += batchSize) {
     const batch = Array.from(
       { length: Math.min(batchSize, chunks - i) },
@@ -323,7 +325,7 @@ export async function generateMockTestChunk(
         const types = [typePool[typeIndex]];
         const thisCount = Math.min(chunkSize, count - (i + j) * chunkSize);
         return thisCount > 0
-          ? generateQuestionsForSubject(subject, thisCount, undefined, types, engine) // 👈 Passes engine to core generator
+          ? generateQuestionsForSubject(subject, thisCount, undefined, types, engine)
           : Promise.resolve([]);
       }
     );
@@ -332,7 +334,7 @@ export async function generateMockTestChunk(
     for (const r of batchResults) results.push(...r);
 
     if (i + batchSize < chunks) {
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 200));
     }
   }
 
